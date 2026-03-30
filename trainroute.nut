@@ -2408,7 +2408,7 @@ class TrainRoute extends Route {
 					numClone = 2;
 				}
 			}
-			local waiting = srcHgStation.GetCargoWaiting(cargo);
+			local waiting = CargoUtils.GetEffectiveCargoWaiting(srcHgStation.stationId, destHgStation.stationId, cargo);
 			local capacity = GetCargoCapacity(cargo);
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null) numClone = min(numClone, maxTrains - numVehicles);
@@ -2417,11 +2417,11 @@ class TrainRoute extends Route {
 			for(local i=0; i<numClone; i++) {
 				CloneAndStartTrain(false,latestVehicle);
 			}
-			if(destDepot != null && (returnRoute != null || IsBiDirectional()) 
+			if(destDepot != null && (returnRoute != null || IsBiDirectional())
 					&& latestEngineSet != null && latestEngineSet.vehiclesPerRoute - numVehicles >= 0){
 				local otherStation = returnRoute != null ? returnRoute.srcHgStation : destHgStation;
 				local rating = otherStation.GetCargoRating(cargo);
-				local waiting = otherStation.GetCargoWaiting(cargo) - (rating >= 30 ? capacity :0);
+				local waiting = CargoUtils.GetEffectiveCargoWaiting(otherStation.stationId, srcHgStation.stationId, cargo) - (rating >= 30 ? capacity :0);
 				numClone = min(1,waiting / capacity);
 				//HgLog.Warning("CheckCloneTrain dest "+numClone+" "+waiting+" "+capacity+" "+this);
 				for(local i=0; i<numClone; i++) {

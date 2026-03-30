@@ -3,7 +3,7 @@
    function GetAuthor()      { return "kakakul"; }
    function GetName()        { return "HogNet"; }
    function GetDescription() { return "HogNet was forked from AAAHogEx, retaining most of the logic, but forcing the AI to build a single large network and connecting all towns no matter how small. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes."; }
-   function GetVersion()     { return 2; }	// also change in main.nut
+   function GetVersion()     { return 3; }	// also change in main.nut
    function MinVersionToLoad() { return 2; }
    function GetDate()        { return "2026-03-30"; }
    function CreateInstance() { return "HogeAI"; }

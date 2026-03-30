@@ -1392,6 +1392,18 @@ class CargoUtils {
 		return false;
 	}
 
+	// Returns cargo waiting at srcStationId that is relevant to this route.
+	// When CargoDist is on, uses GetCargoWaitingVia to count only cargo bound via destStationId.
+	// When CargoDist is off (detected by STATION_INVALID returning non-zero), falls back to
+	// total cargo waiting (greedy behavior).
+	static function GetEffectiveCargoWaiting(srcStationId, destStationId, cargo) {
+		local unassigned = AIStation.GetCargoWaitingVia(srcStationId, AIStation.STATION_INVALID, cargo);
+		if (unassigned > 0) {
+			return AIStation.GetCargoWaiting(srcStationId, cargo);
+		}
+		return AIStation.GetCargoWaitingVia(srcStationId, destStationId, cargo);
+	}
+
 	static function IsDelivable(cargo) {
 		if(CargoUtils.isDelivableCache.rawin(cargo)) {
 			return CargoUtils.isDelivableCache.rawget(cargo);

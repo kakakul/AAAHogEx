@@ -2731,7 +2731,7 @@ class CommonRoute extends Route {
 		}
 		
 		local townTransfer = IsTownTransferRoute();
-		if(townTransfer && AIBase.RandRange(100)<80) { // towntransferは大量にあるのでたまにしか実行しない
+		if(townTransfer && AIBase.RandRange(100) < (HogeAI.Get().IsNetworkMode() ? 50 : 80)) { // There are many town transfers so only run occasionally
 			return;
 		}
 
@@ -2799,10 +2799,10 @@ class CommonRoute extends Route {
 		
 		local isBiDirectional = IsBiDirectional();
 
-		local cargoWaiting = AIStation.GetCargoWaiting(srcHgStation.stationId,cargo);
+		local cargoWaiting = CargoUtils.GetEffectiveCargoWaiting(srcHgStation.stationId, destHgStation.stationId, cargo);
 		local vehicleType = GetVehicleType();
 		if((vehicleType == AIVehicle.VT_AIR || vehicleType == AIVehicle.VT_ROAD) && IsBiDirectional()) {
-			cargoWaiting = min(cargoWaiting, AIStation.GetCargoWaiting(destHgStation.stationId,cargo));
+			cargoWaiting = min(cargoWaiting, CargoUtils.GetEffectiveCargoWaiting(destHgStation.stationId, srcHgStation.stationId, cargo));
 		}
 		local enableVehicleBreakDowns = HogeAI.Get().IsEnableVehicleBreakdowns();
 		if(!("markSendDepot" in choosenEngineSet)) {
@@ -2918,7 +2918,7 @@ class CommonRoute extends Route {
 		
 		//local c6 = PerformanceCounter.Start("c6");	
 		local needsProduction = (!tooMany && vehicleList.Count() < 10) ? (HogeAI.Get().roiBase ? 30 : 10) : 100; //= min(4,maxVehicles / 2 + 1) ? capacity : bottomWaiting;
-		if(townTransfer) needsProduction = max(100,needsProduction);
+		if(townTransfer) needsProduction = max(HogeAI.Get().IsNetworkMode() ? 50 : 100, needsProduction);
 		if(showLog) {
 			HgLog.Info("needsProduction "+needsProduction+" "+this);
 		}
@@ -2947,7 +2947,7 @@ class CommonRoute extends Route {
 						HgLog.Info("BuildVehicle "+this);
 					}
 					c9.Stop();
-					if(latestVehicle != null && !IsTownTransferRoute()) {
+					if(latestVehicle != null && (!IsTownTransferRoute() || HogeAI.Get().IsNetworkMode())) {
 						local c8 = PerformanceCounter.Start("CloneVehicle");	
 						CloneVehicle(latestVehicle);
 						c8.Stop();
@@ -2980,7 +2980,7 @@ class CommonRoute extends Route {
 						buildNum = 1;
 					} else {
 						local bottom = 0;
-						if(townTransfer) {
+						if(townTransfer && !HogeAI.Get().IsNetworkMode()) {
 							bottom = capacity * (vehicleList.Count() + 3);
 						} else if(CargoUtils.IsPaxOrMail(cargo)) {
 							bottom = min(50, capacity);
@@ -2996,7 +2996,7 @@ class CommonRoute extends Route {
 						buildNum = max(1, buildNum);
 					}
 					if(townTransfer) {
-						buildNum = min(1,buildNum);
+						buildNum = min(HogeAI.Get().IsNetworkMode() ? 2 : 1, buildNum);
 					} else if(!IsSupportMode()) {
 						buildNum = min(buildNum, 4);
 					}
