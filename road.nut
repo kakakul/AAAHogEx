@@ -1399,7 +1399,7 @@ class TownBus {
 		// stations.  Since stationA[0] and stationB[0] are now in usedTiles, calling
 		// FindFirstStations again uses the same standard placement logic but naturally finds
 		// different (non-adjacent) road tiles, avoiding traffic jams.
-		foreach(otherCargo in HogeAI.Get().GetPaxMailCargos()) {
+		if(HogeAI.Get().IsNetworkMode()) foreach(otherCargo in HogeAI.Get().GetPaxMailCargos()) {
 			if(otherCargo == cargo) continue;
 			// Complementary stops are infrastructure (same as feeder routes): skip inflation check.
 			if(HogeAI.Get().IsDisableRoad() || TownBus.GetStandardBusEngine(otherCargo) == null) continue;

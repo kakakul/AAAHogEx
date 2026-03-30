@@ -884,7 +884,7 @@ class StationFactory {
 		// Physical station joining: pax/mail stations at a TownCargo should share the same
 		// OpenTTD station ID as an existing pax/mail station at the same town so that cargo
 		// (especially mail) can transfer between vehicle types.
-		if(place instanceof TownCargo && CargoUtils.IsPaxOrMail(cargo)
+		if(HogeAI.Get().IsNetworkMode() && place instanceof TownCargo && CargoUtils.IsPaxOrMail(cargo)
 				&& (result == null || result.stationGroup == null)) {
 			local existingSg = _FindPaxMailStationGroup(place);
 			if(existingSg != null) {
@@ -2378,7 +2378,7 @@ class HgStation {
 
 		// Feeder bus: when physical station joining failed (spread limit), create a
 		// bidirectional bus/truck route connecting this new station to the existing one.
-		if(feederTargetSg != null && place != null && place instanceof TownCargo) {
+		if(HogeAI.Get().IsNetworkMode() && feederTargetSg != null && place != null && place instanceof TownCargo) {
 			TownBus.CreateFeederRoute(this, feederTargetSg);
 			feederTargetSg = null;
 		}		

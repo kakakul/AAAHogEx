@@ -3,9 +3,9 @@
    function GetAuthor()      { return "kakakul"; }
    function GetName()        { return "HogNet"; }
    function GetDescription() { return "HogNet was forked from AAAHogEx, retaining most of the logic, but forcing the AI to build a single large network and connecting all towns no matter how small. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes."; }
-   function GetVersion()     { return 1; }
+   function GetVersion()     { return 2; }
    function MinVersionToLoad() { return 1; }
-   function GetDate()        { return "2026-03-27"; }
+   function GetDate()        { return "2026-03-30"; }
    function CreateInstance() { return "HogeAI"; }
    function GetShortName()   { return "HOGN"; }
    function GetAPIVersion()    { return "14"; }
@@ -129,13 +129,25 @@
 
 				 
 		AddSetting({name = "IsDebug",
-			description = "Debug", 
+			description = "Debug",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+
+		AddSetting({name = "network_mode",
+			description = "Network mode: connect all towns into a single network (HogNet) or use original profit-first behavior (AAAHogEx)",
+			//default_value = 1,
+			easy_value = 1,
+			medium_value = 1,
+			hard_value = 1,
+			custom_value = 1,
+			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+
+		AddLabels("network_mode",
+			{_0 = "AAAHogEx (profit-first)", _1 = "HogNet (connect all towns)"});
 	}
  }
  

@@ -1413,7 +1413,7 @@ class Route {
 				ReOpen();
 			}
 
-			if(!IsSupportRaw() && !IsSrcTransfer() && (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
+			if(!IsSupportRaw() && !(HogeAI.Get().IsNetworkMode() && IsSrcTransfer()) && (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
 				local routes = [];
 				if(srcHgStation.place != null) {
 					routes.extend(PlaceDictionary.Get().GetUsedAsSourceByPriorityRoute(srcHgStation.place, cargo));
@@ -2200,8 +2200,9 @@ class CommonRoute extends Route {
 		local isSrcTownStop = srcHgStation.place != null && srcHgStation.place instanceof TownCargo;
 		local isDestTownStop = destHgStation.place != null && destHgStation.place instanceof TownCargo;
 		// Road vehicles at town stops should not wait for full load — pick up whatever is available and move on
-		local effectiveSrcFullLoad = isSrcFullLoadOrder && !(isRoadRoute && isSrcTownStop);
-		local effectiveDestFullLoad = isDestFullLoadOrder && !(isRoadRoute && isDestTownStop);
+		local isNetworkMode = HogeAI.Get().IsNetworkMode();
+		local effectiveSrcFullLoad = isSrcFullLoadOrder && !(isNetworkMode && isRoadRoute && isSrcTownStop);
+		local effectiveDestFullLoad = isDestFullLoadOrder && !(isNetworkMode && isRoadRoute && isDestTownStop);
 		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (effectiveSrcFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		local srcOrderPosition = AIOrder.GetOrderCount(vehicle);
 		if(isBiDirectional) {
@@ -2224,12 +2225,12 @@ class CommonRoute extends Route {
 			AIOrder.AppendOrder(vehicle, destDepot, depotFlags);
 		}
 		local destOrderPosition = AIOrder.GetOrderCount(vehicle);
-		if(isTransfer && !CargoUtils.IsPaxOrMail(cargo)) {
-			// Transfer-only order: only for non-pax/mail cargo
-			AIOrder.AppendOrder(vehicle, destHgStation.platformTile, 
+		if(isTransfer && !(isNetworkMode && CargoUtils.IsPaxOrMail(cargo))) {
+			// Transfer-only order: only for non-pax/mail cargo (in network mode, pax/mail falls through to bidirectional)
+			AIOrder.AppendOrder(vehicle, destHgStation.platformTile,
 				nonstopIntermediate + (!AITile.IsStationTile(destHgStation.platformTile) ? 0 : (AIOrder.OF_TRANSFER | AIOrder.OF_NO_LOAD)));
-		} else if(isBiDirectional || CargoUtils.IsPaxOrMail(cargo)) {
-			// Pax/mail always uses 2-way flow: vehicles pick up at destination too
+		} else if(isBiDirectional || (isNetworkMode && CargoUtils.IsPaxOrMail(cargo))) {
+			// Pax/mail always uses 2-way flow in network mode: vehicles pick up at destination too
 			AIOrder.AppendOrder(vehicle, destHgStation.platformTile, nonstopIntermediate | (effectiveDestFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		} else {
 			AIOrder.AppendOrder(vehicle, destHgStation.platformTile,

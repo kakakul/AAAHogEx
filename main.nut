@@ -749,7 +749,7 @@ class HogeAI extends AIController {
 			prevLoadAmount = currentLoanAmount;
 			currentLoanAmount = AICompany.GetLoanAmount();
 			ResetEstimateTable();
-			while(indexPointer < 5) {
+			while(indexPointer < (IsNetworkMode() ? 5 : 4)) {
 				UpdateSettings();
 				limitDate = AIDate.GetCurrentDate() + 600;
 				Place.canBuildAirportCache.clear();
@@ -850,7 +850,7 @@ class HogeAI extends AIController {
 				ScanPlaces();
 				break;
 			case 4:
-				ConnectUnservedTowns();
+				if(IsNetworkMode()) ConnectUnservedTowns();
 				break;
 		}
 	}
@@ -1217,7 +1217,7 @@ class HogeAI extends AIController {
 		local builtAirOfInfrastructureMaintenance = false;
 		// Pre-compute served station IDs for global connectivity enforcement (pax/mail town-to-town routes)
 		local paxCargo4Conn = GetPassengerCargo();
-		local servedStationIds = (paxCargo4Conn != false && paxCargo4Conn != null) ? GetPassengerServedStationIds(paxCargo4Conn) : null;
+		local servedStationIds = (IsNetworkMode() && paxCargo4Conn != false && paxCargo4Conn != null) ? GetPassengerServedStationIds(paxCargo4Conn) : null;
 		while(routeCandidates.Count() >= 1){
 			local t = routeCandidates.Pop();
 			if(builtAirOfInfrastructureMaintenance && t.vehicleType == AIVehicle.VT_AIR) {
@@ -4717,7 +4717,11 @@ class HogeAI extends AIController {
 	function IsDebug() {
 		return GetSetting("IsDebug") == 1;
 	}
-	
+
+	function IsNetworkMode() {
+		return GetSetting("network_mode") == 1;
+	}
+
 	function IsEnableVehicleBreakdowns() {
 		return AIGameSettings.GetValue("difficulty.vehicle_breakdowns") >= 1;
 	}
