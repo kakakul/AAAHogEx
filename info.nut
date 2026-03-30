@@ -1,13 +1,13 @@
 ﻿class HogeAI extends AIInfo {
 
-   function GetAuthor()      { return "Rei Ishibashi"; }
-   function GetName()        { return "AAAHogEx"; }
-   function GetDescription() { return "AAAHogEx is a highly profitable AI that offers a fun and challenging experience even for experienced players. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes. It is also compatible with most major mods. For a beginner-friendly setup guide, please visit the website below."; }
-   function GetVersion()     { return 115; } // main.nutも変更必要
-   function MinVersionToLoad() { return 105; }
-   function GetDate()        { return "2026-03-18"; }
+   function GetAuthor()      { return "kakakul"; }
+   function GetName()        { return "HogNet"; }
+   function GetDescription() { return "HogNet was forked from AAAHogEx, retaining most of the logic, but forcing the AI to build a single large network and connecting all towns no matter how small. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes."; }
+   function GetVersion()     { return 1; }
+   function MinVersionToLoad() { return 1; }
+   function GetDate()        { return "2026-03-27"; }
    function CreateInstance() { return "HogeAI"; }
-   function GetShortName()   { return "HOGE"; }
+   function GetShortName()   { return "HOGN"; }
    function GetAPIVersion()    { return "14"; }
    
    function GetSettings() {
@@ -104,7 +104,7 @@
 			description = "Prefer reusing existing roads. Before building new roads, the AI checks whether existing roads can be used. This helps prevent the map from becoming cluttered with too many roads.", 
 			//default_value = 0,
 			easy_value = 1, 
-			medium_value = 0, 
+			medium_value = 1,
 			hard_value = 0, 
 			custom_value = 0, 
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});

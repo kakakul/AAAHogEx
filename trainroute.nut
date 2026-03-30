@@ -1330,9 +1330,11 @@ class TrainRoute extends Route {
 		AIOrder.AppendOrder(engineVehicle, srcHgStation.platformTile, AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE);
 		AIOrder.SetStopLocation	(engineVehicle, AIOrder.GetOrderCount(engineVehicle)-1, AIOrder.STOPLOCATION_MIDDLE);
 		AIOrder.AppendOrder(engineVehicle, srcDepot, AIOrder.OF_SERVICE_IF_NEEDED);
-		if(IsTransfer()) {
+		if(IsTransfer() && !CargoUtils.IsPaxOrMail(cargo)) {
+			// Transfer-only order: only for non-pax/mail cargo
 			AIOrder.AppendOrder(engineVehicle, destHgStation.platformTile, AIOrder.OF_NON_STOP_INTERMEDIATE + AIOrder.OF_TRANSFER + AIOrder.OF_NO_LOAD );
-		} else if(IsBiDirectional()) {
+		} else if(IsBiDirectional() || CargoUtils.IsPaxOrMail(cargo)) {
+			// Pax/mail always uses 2-way flow: vehicles pick up at destination too
 			AIOrder.AppendOrder(engineVehicle, destHgStation.platformTile, AIOrder.OF_NON_STOP_INTERMEDIATE);
 		} else {
 			AIOrder.AppendOrder(engineVehicle, destHgStation.platformTile, AIOrder.OF_NON_STOP_INTERMEDIATE + AIOrder.OF_UNLOAD + AIOrder.OF_NO_LOAD);
@@ -1361,7 +1363,9 @@ class TrainRoute extends Route {
 		AIOrder.SetOrderCompareFunction( vehicle, conditionOrderPosition, AIOrder.CF_EQUALS );
 		AIOrder.SetOrderCondition( vehicle, conditionOrderPosition, AIOrder.OC_LOAD_PERCENTAGE );
 		// return dest station
-		AIOrder.AppendOrder( vehicle, destStation.platformTile, AIOrder.OF_NON_STOP_INTERMEDIATE + AIOrder.OF_UNLOAD + AIOrder.OF_NO_LOAD );
+		// Pax/mail always allows 2-way flow; only non-pax/mail uses unload-and-leave-empty
+		local returnDestFlags = AIOrder.OF_NON_STOP_INTERMEDIATE + (CargoUtils.IsPaxOrMail(cargo) ? 0 : AIOrder.OF_UNLOAD + AIOrder.OF_NO_LOAD);
+		AIOrder.AppendOrder( vehicle, destStation.platformTile, returnDestFlags );
 		AIOrder.SetStopLocation( vehicle, AIOrder.GetOrderCount(vehicle)-1, AIOrder.STOPLOCATION_MIDDLE);
 	}
 	
@@ -1496,7 +1500,7 @@ class TrainRoute extends Route {
 		//oldDestHgStation.RemoveOnlyPlatform();// 残った列車がなぜか消えかかった駅で下ろそうとする。ささくれるので線路だけ残す(SendDepotを帰路だけにすれば消しても問題ないかもしれない)
 		local latestEngineVehicle = GetOrderVehicle();
 		if(latestEngineVehicle != null) {
-			local orderFlags = AIOrder.OF_NON_STOP_INTERMEDIATE + (IsBiDirectional() ? 0 : AIOrder.OF_UNLOAD + AIOrder.OF_NO_LOAD);
+			local orderFlags = AIOrder.OF_NON_STOP_INTERMEDIATE + ((IsBiDirectional() || CargoUtils.IsPaxOrMail(cargo)) ? 0 : AIOrder.OF_UNLOAD + AIOrder.OF_NO_LOAD);
 			local failed = false;
 			if(AIOrder.GetOrderCount (latestEngineVehicle) >= 4) { // return routeがある場合、changeしないのでこちらにはこない？
 				if(!AIOrder.InsertOrder(latestEngineVehicle, 3, destHgStation.platformTile, orderFlags)) {

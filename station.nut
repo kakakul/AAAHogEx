@@ -881,6 +881,40 @@ class StationFactory {
 			this.nearestFor2 = toTile;
 			result = SelectBestWithPieceStation(place, cargo, toTile);
 		}
+		// Physical station joining: pax/mail stations at a TownCargo should share the same
+		// OpenTTD station ID as an existing pax/mail station at the same town so that cargo
+		// (especially mail) can transfer between vehicle types.
+		if(place instanceof TownCargo && CargoUtils.IsPaxOrMail(cargo)
+				&& (result == null || result.stationGroup == null)) {
+			local existingSg = _FindPaxMailStationGroup(place);
+			if(existingSg != null) {
+				local savedTarget = this.target;
+				local savedPlace = this.place;
+				local savedNearestFor = this.nearestFor;
+				local savedNearestFor2 = this.nearestFor2;
+				local savedProhibit = clone this.prohibitAcceptCargos;
+
+				local joinResult = CreateBestOnStationGroup(existingSg, cargo, toTile);
+
+				this.target = savedTarget;
+				this.place = savedPlace;
+				this.nearestFor = savedNearestFor;
+				this.nearestFor2 = savedNearestFor2;
+				this.prohibitAcceptCargos = savedProhibit;
+
+				if(joinResult != null) {
+					joinResult.place = place;
+					joinResult.cargo = cargo;
+					HgLog.Info("PhysJoin: "+GetTypeName()+" at "+place.GetName()+" shares station ID with "+existingSg.GetName());
+					result = joinResult;
+				} else {
+					HgLog.Info("PhysJoin: "+GetTypeName()+" at "+place.GetName()+" cannot join "+existingSg.GetName()+" (spread limit) - feeder bus will be created.");
+					if(result != null) {
+						result.feederTargetSg = existingSg; // BuildExec() will create a bidirectional feeder bus
+					}
+				}
+			}
+		}
 		if(result != null) {
 			result.place = place;
 			result.cargo = cargo;
@@ -888,6 +922,20 @@ class StationFactory {
 			HgLog.Warning("stationPlace "+place.GetName()+" CreateBest returned no stations."+this);		
 		}
 		return result;
+	}
+
+	// Returns an existing non-TownBus pax/mail StationGroup for this place, or null if none.
+	function _FindPaxMailStationGroup(place) {
+		foreach(sg, _ in place.GetStationGroups()) {
+			if(sg.isVirtual || sg.hgStations.len() == 0) continue;
+			if(sg.IsTownStop()) continue;
+			foreach(hs in sg.hgStations) {
+				if(hs.cargo != null && CargoUtils.IsPaxOrMail(hs.cargo)) {
+					return sg;
+				}
+			}
+		}
+		return null;
 	}
 
 	function CreateBestOnStationGroup(stationGroup, cargo, toTile) {
@@ -932,7 +980,11 @@ class StationFactory {
 		if(array.len()==0) {
 			return null;
 		} else {
-			return array[0][0];
+			local best = array[0][0];
+			for(local i = 1; i < array.len(); i++) {
+				best.fallbackCandidates.push(array[i][0]);
+			}
+			return best;
 		}
 	}
 	
@@ -1041,7 +1093,8 @@ class StationFactory {
 			if(CheckFinal(station) && station.Build(levelTiles, true)) {
 				HgLog.Info("Build succeeded(TestMode) "+station+" "+this);
 				station.levelTiles = levelTiles;
-				return [[station,0]]; // この先は重いのでカット
+				candidates.push([station,0]);
+				if(candidates.len() >= 2) break; // collect one fallback then stop; testing is expensive
 			}
 			if(startDate + 7 < AIDate.GetCurrentDate()) {
 				HgLog.Warning("GetBestHgStationCosts reached limitDate2."+this);
@@ -1049,7 +1102,7 @@ class StationFactory {
 				break;
 			}
 		}
-		return [];
+		return candidates;
 	}
 	
 	function CheckFinal(station) {
@@ -1843,6 +1896,8 @@ class HgStation {
 	pieceStationTile = null;
 	platformRectangle = null;
 	usingRoutes = null;
+	feederTargetSg = null; // when set, BuildExec() creates a bidirectional feeder bus to this existing station group
+	fallbackCandidates = null; // additional TestMode-passing candidates to try in BuildExec if the primary fails
 	
 	constructor(platformTile, stationDirection) {
 		this.platformTile = platformTile;
@@ -1851,6 +1906,7 @@ class HgStation {
 		this.builded = false;
 		this.usingRoutes = [];
 		this.subPlaces = [];
+		this.fallbackCandidates = [];
 	}
 	
 	function Save() {
@@ -2279,7 +2335,20 @@ class HgStation {
 			HogeAI.WaitForMoney(GetNeedMoney());
 			if(!Build(levelTiles,false)) {
 				if(IsDemolishIfFailToBuild()) Demolish();
-				return false;
+				local builtFallback = false;
+				foreach(fallback in fallbackCandidates) {
+					this.platformTile = fallback.platformTile;
+					this.originTile = fallback.originTile;
+					this.levelTiles = fallback.levelTiles;
+					this.stationDirection = fallback.stationDirection;
+					this.platformRectangle = null; // reset cached rectangle for new tile
+					if(Build(this.levelTiles, false)) {
+						HgLog.Info("BuildExec: fallback succeeded at "+HgTile(this.platformTile));
+						builtFallback = true;
+						break;
+					}
+				}
+				if(!builtFallback) return false;
 			}
 		}
 		
@@ -2305,6 +2374,13 @@ class HgStation {
 
 		foreach(corner in GetPlatformRectangle().GetCorners()) { 
 			HgStation.townUsed.rawset(AITile.GetTownAuthority(corner.tile),true); // TODO: 消えても残る
+		}
+
+		// Feeder bus: when physical station joining failed (spread limit), create a
+		// bidirectional bus/truck route connecting this new station to the existing one.
+		if(feederTargetSg != null && place != null && place instanceof TownCargo) {
+			TownBus.CreateFeederRoute(this, feederTargetSg);
+			feederTargetSg = null;
 		}		
 
 		return true;
@@ -2414,9 +2490,9 @@ class HgStation {
 		s = id.tostring();
 		s = "0000".slice(0,max(0,4-s.len()))+s;
 		if(name != null) {
-			SetNameSlice(s+name);
+			SetNameSlice(s+" "+name);
 		} else if(place != null) {
-			SetNameSlice(s+place.GetName());
+			SetNameSlice(s+" "+place.GetName());
 		} else if(cargo != null) {
 			local hasPlace = false;
 			foreach(station in stationGroup.hgStations) {
@@ -2426,7 +2502,7 @@ class HgStation {
 			}
 			if(!hasPlace) {
 				local town = AITile.GetClosestTown(GetLocation());	
-				SetNameSlice(s+AITown.GetName(town)+" "+AICargo.GetName(cargo)+" Yard");
+				SetNameSlice(s+" "+AITown.GetName(town)+" "+AICargo.GetName(cargo)+" Yard");
 			}
 		}
 	}
@@ -3380,15 +3456,19 @@ class PieceStation extends HgStation {
 				}
 			}
 		}
-		if(BuildUtils.RetryUntilFree(function():(platformTile,joinStation,roadVehicleType,roadDir) {
-			return AIRoad.BuildDriveThroughRoadStation (platformTile, platformTile + HgTile.DIR4Index[roadDir], roadVehicleType, joinStation);
-		},3,supressWarning)) {
+		// Try all 4 directions. The road state at exec time may differ from test time
+		// (e.g. the pathfinder built a new road adjacent to this tile between the two phases),
+		// causing roadDir/otherDir to pick a direction that no longer matches the join station's
+		// orientation. Trying all 4 avoids missing the one direction that works.
+		foreach(i, d in HgTile.DIR4Index) {
+			if(BuildUtils.RetryUntilFree(function():(platformTile,joinStation,roadVehicleType,i) {
+				return AIRoad.BuildDriveThroughRoadStation(platformTile, platformTile + HgTile.DIR4Index[i], roadVehicleType, joinStation);
+			},3,true)) {
 			return true;
 		}
-		if(BuildUtils.RetryUntilFree(function():(platformTile,joinStation,roadVehicleType,otherDir) {
-			return AIRoad.BuildDriveThroughRoadStation (platformTile, platformTile + HgTile.DIR4Index[otherDir], roadVehicleType, joinStation);
-		},3,supressWarning)) {
-			return true;
+		}
+		if(!supressWarning) {
+			HgLog.Warning("BuildDriveThroughRoadStation failed all directions "+HgTile(platformTile)+" "+AIError.GetLastErrorString());
 		}
 		return false;
 	}

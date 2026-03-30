@@ -1413,7 +1413,7 @@ class Route {
 				ReOpen();
 			}
 
-			if(!IsSupportRaw() && (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
+			if(!IsSupportRaw() && !IsSrcTransfer() && (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
 				local routes = [];
 				if(srcHgStation.place != null) {
 					routes.extend(PlaceDictionary.Get().GetUsedAsSourceByPriorityRoute(srcHgStation.place, cargo));
@@ -1661,7 +1661,7 @@ class CommonRoute extends Route {
 		local tooManyVehicles = self.IsTooManyVehiclesForNewRoute(self); //vehiclesRoom <= 1;
 		local reduceForMaintenance = false; // 収益性の低い路線を繰り返し作るだけ HogeAI.Get().IsInfrastructureMaintenance() && HogeAI.Get().noRouteCnadidates;
 		
-		HgLog.Info("Check RemoveRoute vt:"+self.GetLabel()+" routes:"+routeInstances.len()+" tooMany:"+tooManyVehicles);
+		HgLog.Info("CheckReduce vt:"+self.GetLabel()+" routes:"+routeInstances.len()+" tooMany:"+tooManyVehicles);
 
 		if(vehicleType == AIVehicle.VT_AIR) {
 			if(year % 10 == 9) {
@@ -1724,7 +1724,11 @@ class CommonRoute extends Route {
 			route.profits.push(profit-infraCost-depreciation);
 			local profitsLen = route.profits.len();
 			local sum = 0;
-			local checkYear = emergency ? 3 : 5;
+			// Scale the rolling window by map size (larger maps have slower cargo growth).
+			// Ships always use 5 years. Before 1950 the economy is young so keep 5 years.
+			local mapSize = max(AIMap.GetMapSizeX(), AIMap.GetMapSizeY());
+			local mapCheckYear = mapSize <= 512 ? 3 : (mapSize <= 1024 ? 4 : 5);
+			local checkYear = emergency ? 3 : (vehicleType == AIVehicle.VT_WATER || year < 1950 ? 5 : mapCheckYear);
 			local averageProfit = null;
 			if(route.profits.len() >= checkYear) {
 				local d = checkYear; //min(route.profits.len(),10);
@@ -1734,8 +1738,15 @@ class CommonRoute extends Route {
 				averageProfit = sum / d; // TODO: 古くなる場合のみ必要。寿命も考慮 - totalValue * 9 / 100/*減価償却*/;
 				if(averageProfit <= 0) {
 					HgLog.Warning("RemoveRoute averageProfit:"+averageProfit+" infraCost:"+infraCost+" "+route);
+					if(vehicleList.Count() > 2) {
+						// Too many vehicles may be the cause; try halving first before removing outright.
+						// Clear the profits history so the route has checkYear fresh years to recover.
+						route.ReduceVehiclesToHalf();
+						route.profits = [];
+					} else {
 					route.Remove();
 					routeRemoved = true;
+					}
 					continue;
 				}
 			}
@@ -1760,6 +1771,21 @@ class CommonRoute extends Route {
 					route.ReduceVehiclesToHalf();
 				}
 			}
+			// If average cargo load is below 25% across established vehicles, the route is over-staffed.
+			// Bidirectional routes naturally run at ~50% (one leg loaded, one empty), so 25% is well below
+			// the expected minimum and indicates clearly too many vehicles.
+			if(vehicleType == AIVehicle.VT_ROAD && vehicleList.Count() > 2) {
+				local totalLoad = 0;
+				local totalCapacity = 0;
+				foreach(v,_ in vehicleList) {
+					totalLoad += AIVehicle.GetCargoLoad(v, route.cargo);
+					totalCapacity += AIVehicle.GetCapacity(v, route.cargo);
+				}
+				if(totalCapacity > 0 && totalLoad * 4 < totalCapacity) {
+					HgLog.Warning("ReduceVehiclesToHalf (low avg load "+totalLoad+"/"+totalCapacity+") "+route);
+					route.ReduceVehiclesToHalf();
+				}
+			}
 			if(averageProfit != null) {
 				local routeProfit = averageProfit;
 				if(tooManyVehicles) routeProfit /= vehicleList.Count();
@@ -1771,6 +1797,16 @@ class CommonRoute extends Route {
 		if(speedCount >= 100) {
 			HogeAI.Get().roadTrafficRate = speedRateSum / speedCount;
 			HgLog.Info("roadTrafficRate:"+HogeAI.Get().roadTrafficRate);
+		}
+
+		// Support routes are skipped in the main loop above. Run their load/speed reduction here,
+		// reusing the vehicleSpeeds already computed for this check cycle.
+		if(vehicleType == AIVehicle.VT_ROAD && vehicleSpeeds.Count() > 0) {
+			foreach(index, route in routeInstances) {
+				if(route.IsRemoved()) continue;
+				if(!route.IsSupport()) continue;
+				route.CheckReduceForRoadTransfer(vehicleSpeeds);
+			}
 		}
 		
 		if(((tooManyVehicles || reduceForMaintenance) && minRoutes.Count() >= 10) || emergency) {
@@ -1789,14 +1825,36 @@ class CommonRoute extends Route {
 	
 	function CheckReduceForRoadTransfer(vehiclesSpeed) { // transferは利益で削減しないのでスピードで落とす
 		local vehicleList = AIVehicleList_Group(vehicleGroup);
-		vehicleList.Valuate(function(v):(vehiclesSpeed) { return vehiclesSpeed.HasItem(v) ? vehiclesSpeed.GetValue(v) : -1;} );
-		vehicleList.RemoveValue(-1);
+		vehicleList.Valuate(AIVehicle.IsStoppedInDepot);
+		vehicleList.RemoveValue(1);
 		local latestEngineSet = GetLatestEngineSet();
-		if(vehicleList.Count() >= 6 && latestEngineSet != null) {
-			//HgLog.Warning("AverageSpeed "+ListUtils.Average(vehicleList)+" max:"+AIEngine.GetMaxSpeed(latestEngineSet.engine)+" "+this)
-			if(ListUtils.Average(vehicleList) < AIEngine.GetMaxSpeed(latestEngineSet.engine) /*latestEngineSet.cruiseSpeed*/ / 4) {
+		if(vehicleList.Count() <= 2 || latestEngineSet == null) return;
+
+		// Primary check: if average cargo load across all vehicles is below 50%, the route has too
+		// many vehicles. Support/feeder routes are bidirectional so natural avg is ~50% (loaded
+		// one way, empty return); below 50% means over-staffed.
+		local totalLoad = 0;
+		local totalCapacity = 0;
+		foreach(v,_ in vehicleList) {
+			totalLoad += AIVehicle.GetCargoLoad(v, cargo);
+			totalCapacity += AIVehicle.GetCapacity(v, cargo);
+		}
+		if(totalCapacity > 0 && totalLoad * 2 < totalCapacity) {
+			HgLog.Warning("ReduceVehiclesToHalf (support low avg load "+totalLoad+"/"+totalCapacity+") maxVehicles:"+maxVehicles+" "+this);
 				ReduceVehiclesToHalf();
-				HgLog.Warning("ReduceVehiclesToHalf (averageSpeed < maxSpeed / 4) maxVehicles:"+maxVehicles+" "+this);
+			return;
+		}
+
+		// Secondary check: severe congestion (avg speed < 10% of max) also warrants reduction.
+		// vehiclesSpeed is pre-computed in CheckReduce at no extra cost.
+		local speedList = AIList();
+		speedList.AddList(vehicleList);
+		speedList.Valuate(function(v):(vehiclesSpeed) { return vehiclesSpeed.HasItem(v) ? vehiclesSpeed.GetValue(v) : -1; });
+		speedList.RemoveValue(-1);
+		if(speedList.Count() >= 6) {
+			if(ListUtils.Average(speedList) < AIEngine.GetMaxSpeed(latestEngineSet.engine) / 10) {
+				HgLog.Warning("ReduceVehiclesToHalf (support avgSpeed < maxSpeed/10) maxVehicles:"+maxVehicles+" "+this);
+				ReduceVehiclesToHalf();
 			}
 		}
 	}
@@ -2130,11 +2188,21 @@ class CommonRoute extends Route {
 
 		local nonstopIntermediate = GetVehicleType() == AIVehicle.VT_ROAD ? AIOrder.OF_NON_STOP_INTERMEDIATE : 0;
 
+		// When breakdowns are disabled, road vehicles only need to visit the depot when servicing is actually needed
+		local depotFlags = (!HogeAI.Get().IsEnableVehicleBreakdowns() && GetVehicleType() == AIVehicle.VT_ROAD)
+			? (AIOrder.OF_SERVICE_IF_NEEDED | nonstopIntermediate)
+			: nonstopIntermediate;
 		if(useDepotOrder && (HogeAI.Get().IsEnableVehicleBreakdowns() || GetVehicleType() == AIVehicle.VT_ROAD)) {
-			AIOrder.AppendOrder(vehicle, depot, nonstopIntermediate );
+			AIOrder.AppendOrder(vehicle, depot, depotFlags);
 		}
 		local isBiDirectional = IsBiDirectional();
-		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (isSrcFullLoadOrder ? AIOrder.OF_FULL_LOAD_ANY : 0));
+		local isRoadRoute = GetVehicleType() == AIVehicle.VT_ROAD;
+		local isSrcTownStop = srcHgStation.place != null && srcHgStation.place instanceof TownCargo;
+		local isDestTownStop = destHgStation.place != null && destHgStation.place instanceof TownCargo;
+		// Road vehicles at town stops should not wait for full load — pick up whatever is available and move on
+		local effectiveSrcFullLoad = isSrcFullLoadOrder && !(isRoadRoute && isSrcTownStop);
+		local effectiveDestFullLoad = isDestFullLoadOrder && !(isRoadRoute && isDestTownStop);
+		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (effectiveSrcFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		local srcOrderPosition = AIOrder.GetOrderCount(vehicle);
 		if(isBiDirectional) {
 			if(!AIOrder.AppendOrder(vehicle, srcHgStation.platformTile, loadOrderFlags)) {
@@ -2153,14 +2221,16 @@ class CommonRoute extends Route {
 		AppendSrcToDestOrder(vehicle);
 		
 		if(destDepot != null && (HogeAI.Get().IsEnableVehicleBreakdowns() || GetVehicleType() == AIVehicle.VT_ROAD)) {
-			AIOrder.AppendOrder(vehicle, destDepot, nonstopIntermediate );
+			AIOrder.AppendOrder(vehicle, destDepot, depotFlags);
 		}
 		local destOrderPosition = AIOrder.GetOrderCount(vehicle);
-		if(isTransfer) {
+		if(isTransfer && !CargoUtils.IsPaxOrMail(cargo)) {
+			// Transfer-only order: only for non-pax/mail cargo
 			AIOrder.AppendOrder(vehicle, destHgStation.platformTile, 
 				nonstopIntermediate + (!AITile.IsStationTile(destHgStation.platformTile) ? 0 : (AIOrder.OF_TRANSFER | AIOrder.OF_NO_LOAD)));
-		} else if(isBiDirectional) {
-			AIOrder.AppendOrder(vehicle, destHgStation.platformTile, nonstopIntermediate | (isDestFullLoadOrder ? AIOrder.OF_FULL_LOAD_ANY : 0));
+		} else if(isBiDirectional || CargoUtils.IsPaxOrMail(cargo)) {
+			// Pax/mail always uses 2-way flow: vehicles pick up at destination too
+			AIOrder.AppendOrder(vehicle, destHgStation.platformTile, nonstopIntermediate | (effectiveDestFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		} else {
 			AIOrder.AppendOrder(vehicle, destHgStation.platformTile,
 				nonstopIntermediate + (!AITile.IsStationTile(destHgStation.platformTile) ? 0 : (AIOrder.OF_UNLOAD | AIOrder.OF_NO_LOAD)));
@@ -2561,11 +2631,22 @@ class CommonRoute extends Route {
 					waitingCargo = min(waitingCargo, AIStation.GetCargoWaiting(destHgStation.stationId,cargo));
 				}
 				if(waitingCargo < min(50,latestEngineSet.capacity)) {
+					// Save the full list before narrowing, so we can fall back if the speed filter finds nothing
+					local allMovingVehicles = AIList();
+					allMovingVehicles.AddList(vehicleList);
 					vehicleList.Valuate(AIVehicle.GetCurrentSpeed);
 					vehicleList.KeepValue(0);
 					if(!isBiDirectional && !townTransfer) {
 						vehicleList.Valuate(AIVehicle.GetState);
 						vehicleList.RemoveValue(AIVehicle.VS_AT_STATION);
+					}
+					// Drive-through stops: vehicles pass through without stopping, so speed is never 0
+					// even when the route has far too many trucks. Fall back to empty vehicles as
+					// safe reduction candidates (they aren't mid-delivery).
+					if(vehicleList.Count() <= minNum) {
+						vehicleList = allMovingVehicles;
+						vehicleList.Valuate(AIVehicle.GetCargoLoad, cargo);
+						vehicleList.KeepValue(0);
 					}
 				} else {
 					vehicleList.Clear();

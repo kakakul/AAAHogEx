@@ -1394,6 +1394,46 @@ class TownBus {
 		HgLog.Info("BuildBusStops succeeded."+this);
 		RoadRoute.AddUsedTile(stationA[0]);
 		RoadRoute.AddUsedTile(stationB[0]);
+
+		// Also build the complementary stop type (bus<->truck) joined to the same OpenTTD
+		// stations.  Since stationA[0] and stationB[0] are now in usedTiles, calling
+		// FindFirstStations again uses the same standard placement logic but naturally finds
+		// different (non-adjacent) road tiles, avoiding traffic jams.
+		foreach(otherCargo in HogeAI.Get().GetPaxMailCargos()) {
+			if(otherCargo == cargo) continue;
+			// Complementary stops are infrastructure (same as feeder routes): skip inflation check.
+			if(HogeAI.Get().IsDisableRoad() || TownBus.GetStandardBusEngine(otherCargo) == null) continue;
+			local compVehType = AICargo.HasCargoClass(otherCargo, AICargo.CC_PASSENGERS)
+				? AIRoad.ROADVEHTYPE_BUS : AIRoad.ROADVEHTYPE_TRUCK;
+			local aiTestComp = AITestMode();
+			local pairComp = FindFirstStations(AITown.GetLocation(town));
+			local aiExecComp = AIExecMode();
+			if(pairComp != null && pairComp[0][0] != pairComp[1][0]) {
+				local stationA_id = AIStation.GetStationID(stationA[0]);
+				local stationB_id = AIStation.GetStationID(stationB[0]);
+				local compA = pairComp[0];
+				local compB = pairComp[1];
+				if(BuildUtils.RetryUntilFree(function():(compA, compVehType, stationA_id) {
+					return AIRoad.BuildDriveThroughRoadStation(compA[0], compA[1], compVehType, stationA_id);
+				})) {
+					HgLog.Info("BuildBusStops: added complementary "+AICargo.GetName(otherCargo)+" stop at "+HgTile(compA[0])+" "+this);
+					RoadRoute.AddUsedTile(compA[0]);
+				} else {
+					HgLog.Warning("BuildBusStops: cannot add complementary "+AICargo.GetName(otherCargo)+" stop A "+this+" err:"+AIError.GetLastErrorString());
+				}
+				if(BuildUtils.RetryUntilFree(function():(compB, compVehType, stationB_id) {
+					return AIRoad.BuildDriveThroughRoadStation(compB[0], compB[1], compVehType, stationB_id);
+				})) {
+					HgLog.Info("BuildBusStops: added complementary "+AICargo.GetName(otherCargo)+" stop at "+HgTile(compB[0])+" "+this);
+					RoadRoute.AddUsedTile(compB[0]);
+				} else {
+					HgLog.Warning("BuildBusStops: cannot add complementary "+AICargo.GetName(otherCargo)+" stop B "+this+" err:"+AIError.GetLastErrorString());
+				}
+			} else {
+				HgLog.Warning("BuildBusStops: cannot find complementary "+AICargo.GetName(otherCargo)+" stop positions "+this);
+			}
+		}
+
 		Save();
 		return true;
 	}
@@ -1454,7 +1494,6 @@ class TownBus {
 		Save();
 		return depot != null;
 	}
-
 	
 	function FindFirstStations(center) {
 		local rect = Rectangle.Center(HgTile(center),6);
@@ -1596,7 +1635,6 @@ class TownBus {
 			}
 		}
 		CheckTransfer();
-		
 		if(!isTransfer && AIBase.RandRange(100) < 5 && HogeAI.Get().IsRich()) {
 			CheckRenewal();
 		}
@@ -1907,6 +1945,294 @@ class TownBus {
 
 	function _tostring() {
 		return "TownBus["+AITown.GetName(town)+":"+AICargo.GetName(cargo)+"]";
+	}
+
+	// Creates a bidirectional feeder bus between newHgStation (which couldn't physically join
+	// existingSg due to station spread limits) and existingSg.
+	// Bus stops join both station groups so passengers at either station can board.
+	static function CreateFeederRoute(newHgStation, existingSg) {
+		local cargo = newHgStation.cargo;
+		if(cargo == null || !CargoUtils.IsPaxOrMail(cargo)) return false;
+		// Feeder routes bypass the inflation check: they are required infrastructure
+		// (connecting stations that physically cannot spread-join), not profit routes.
+		// Still respect IsDisableRoad and vehicle/engine limits.
+		local canUseForFeeder = !HogeAI.Get().IsDisableRoad()
+			&& TownBus.GetStandardBusEngine(cargo) != null
+			&& !RoadRoute.IsTooManyVehiclesForSupportRoute(RoadRoute);
+		if(!canUseForFeeder) {
+			HgLog.Info("PhysJoinFeeder: bus unavailable for "+AICargo.GetName(cargo));
+			return false;
+		}
+		local currentRoadType = AIRoad.GetCurrentRoadType();
+		AIRoad.SetCurrentRoadType(TownBus.GetRoadType());
+		local ok = TownBus._DoCreateFeederRoute(newHgStation, existingSg, cargo);
+		AIRoad.SetCurrentRoadType(currentRoadType);
+		return ok;
+	}
+
+	static function _DoCreateFeederRoute(newHgStation, existingSg, cargo) {
+		local execMode = AIExecMode();
+
+		local busEngine = TownBus.GetStandardBusEngine(cargo);
+		if(busEngine == null) {
+			HgLog.Warning("PhysJoinFeeder: no engine for "+AICargo.GetName(cargo));
+			return false;
+		}
+
+		// --- Stop near the new station: join to newHgStation.stationGroup ---
+		local srcStop = null;
+		if(newHgStation instanceof RoadStation) {
+			srcStop = newHgStation; // new station is already a road stop; use directly
+		}
+		if(srcStop == null) {
+			local fSrc = RoadStationFactory(cargo, true); // piece station: simple drive-through
+			srcStop = fSrc.CreateBest(newHgStation.stationGroup, cargo, existingSg.hgStations[0].platformTile);
+			if(srcStop != null) {
+				srcStop.place = newHgStation.place;
+				if(!srcStop.BuildExec()) srcStop = null;
+			}
+		}
+		if(srcStop == null) {
+			HgLog.Warning("PhysJoinFeeder: cannot build bus stop near new station "+newHgStation);
+			return false;
+		}
+
+		// --- Stop near the existing station: reuse or join to existingSg ---
+		local destStop = null;
+		foreach(hs in existingSg.hgStations) {
+			if(hs instanceof RoadStation && hs.cargo == cargo) {
+				destStop = hs;
+				break;
+			}
+		}
+		if(destStop == null) {
+			local fDest = RoadStationFactory(cargo, true);
+			destStop = fDest.CreateBest(existingSg, cargo, newHgStation.platformTile);
+			if(destStop != null) {
+				if(existingSg.hgStations.len() > 0 && existingSg.hgStations[0].place != null) {
+					destStop.place = existingSg.hgStations[0].place;
+				}
+				if(!destStop.BuildExec()) destStop = null;
+			}
+		}
+		if(destStop == null) {
+			HgLog.Warning("PhysJoinFeeder: cannot build bus stop near existing station "+existingSg.GetName());
+			return false;
+		}
+
+		// --- Depot near the town ---
+		local town = newHgStation.place != null
+			? newHgStation.place.town
+			: AITile.GetTownAuthority(newHgStation.platformTile);
+		// Strategy:
+		// 1. Reuse an already-built TownBus depot if one exists (read field directly — do NOT
+		//    call GetDepot(), which permanently sets depot=false on failure and breaks CheckInterval).
+		// 2. If the TownBus has its bus stops built (stations.len>=2), call BuildBusDepot()
+		//    directly — this is the exact same proven path used by CheckInterval(). It uses
+		//    AITown.GetLocation(town) for BFS, which connects to the town's road network.
+		// 3. Last resort: manual BFS from the feeder stop tiles.
+		if(!AITown.IsValidTown(town)) {
+			town = AITile.GetTownAuthority(srcStop.platformTile);
+		}
+		local depot = null;
+		local paxKey = town + ":" + HogeAI.GetPassengerCargo();
+		local cargoKey = town + ":" + cargo;
+		// Step 1: reuse existing TownBus depot — read .depot directly, never call GetDepot()
+		// which permanently sets depot=false on failure and breaks CheckInterval.
+		foreach(key in [paxKey, cargoKey]) {
+			if(TownBus.townMap.rawin(key)) {
+				local d = TownBus.townMap[key].depot;
+				if(typeof d == "integer" && AIRoad.IsRoadDepotTile(d)) { depot = d; break; }
+			}
+		}
+		// Step 2: call BuildBusDepot() on TownBus that has stations — same proven path as CheckInterval.
+		// BuildBusDepot() already tries AITown.GetLocation(town), so step 3 only needs the feeder
+		// stop tiles as extra fallback locations.
+		local triedTownCenter = false;
+		if(depot == null) {
+			local townBusInst = null;
+			foreach(key in [paxKey, cargoKey]) {
+				if(TownBus.townMap.rawin(key)) {
+					local tb = TownBus.townMap[key];
+					if(tb.stations.len() >= 2 && tb.depot == null) { townBusInst = tb; break; }
+				}
+			}
+			if(townBusInst != null) {
+				triedTownCenter = true;
+				townBusInst.BuildBusDepot(); // sets townBusInst.depot on success; never sets false
+				local d = townBusInst.depot;
+				if(typeof d == "integer" && AIRoad.IsRoadDepotTile(d)) depot = d;
+			}
+		}
+		// Step 3: BFS from feeder stop tiles (and town center if not yet tried).
+		// If a depot is built here, store it back into TownBus so CheckInterval
+		// doesn't build a second one later.
+		if(depot == null) {
+			HogeAI.WaitForMoney(10000);
+			if(!triedTownCenter && AITown.IsValidTown(town)) {
+				depot = RoadRoute.BuildDepotNear(AITown.GetLocation(town));
+			}
+			if(depot == null) depot = RoadRoute.BuildDepotNear(srcStop.platformTile);
+			if(depot == null) depot = RoadRoute.BuildDepotNear(destStop.platformTile);
+			if(depot != null) {
+				foreach(key in [paxKey, cargoKey]) {
+					if(TownBus.townMap.rawin(key)) {
+						local tb = TownBus.townMap[key];
+						if(tb.depot == null) { tb.depot = depot; tb.Save(); }
+					}
+				}
+			}
+		}
+		if(depot == null) {
+			HgLog.Warning("PhysJoinFeeder: cannot build depot near "+(AITown.IsValidTown(town) ? AITown.GetName(town) : "INVALID town"));
+			return false;
+		}
+
+		// --- Road path between the two stops ---
+		local roadBuilder = RoadBuilder(busEngine);
+		roadBuilder.costDrivethroughstation = 0;
+		roadBuilder.pathFindLimit = 30;
+		if(!roadBuilder.BuildPath([srcStop.platformTile], [destStop.platformTile], true)) {
+			HgLog.Warning("PhysJoinFeeder: no road path "+HgTile(srcStop.platformTile)+" -> "+HgTile(destStop.platformTile));
+			return false;
+		}
+
+		// --- Complementary stops and companion vehicle routes ---
+		// For each other pax/mail cargo (mail when primary is pax, pax when primary is mail):
+		// find or build a complementary stop at each feeder stop's OpenTTD station, then
+		// create a companion support route using the same depot and road path.
+		foreach(otherCargo in HogeAI.Get().GetPaxMailCargos()) {
+			if(otherCargo == cargo) continue;
+			if(HogeAI.Get().IsDisableRoad() || TownBus.GetStandardBusEngine(otherCargo) == null) continue;
+			if(srcStop.stationId == null || !AIStation.IsValidStation(srcStop.stationId)) continue;
+			if(destStop.stationId == null || !AIStation.IsValidStation(destStop.stationId)) continue;
+			local compStationType = AICargo.HasCargoClass(otherCargo, AICargo.CC_PASSENGERS)
+				? AIStation.STATION_BUS_STOP : AIStation.STATION_TRUCK_STOP;
+
+			// For each feeder stop: if the OpenTTD station already has a complementary stop,
+			// find its HgStation object so we can wire it into the companion route.
+			// If no complementary stop exists yet, build one.
+			local compSrcStop = null;
+			local srcCompTiles = AITileList_StationType(srcStop.stationId, compStationType);
+			if(srcCompTiles.Count() > 0) {
+				foreach(tile, _ in srcCompTiles) {
+					if(!HgStation.tileStation.rawin(tile)) continue;
+					local hsId = HgStation.tileStation[tile];
+					if(!HgStation.worldInstances.rawin(hsId)) continue;
+					local hs = HgStation.worldInstances[hsId];
+					if(hs.cargo == otherCargo) { compSrcStop = hs; break; }
+				}
+				// compSrcStop stays null if stop tiles exist but aren't tracked (cannot use)
+			} else {
+				local tempSg = StationGroup();
+				tempSg.AddHgStation(srcStop);
+				local candidate = RoadStationFactory(otherCargo, true).CreateBest(tempSg, otherCargo, destStop.platformTile);
+				if(candidate != null) {
+					candidate.place = srcStop.place;
+					candidate.feederTargetSg = null;
+					if(candidate.BuildExec()) {
+						compSrcStop = candidate;
+						HgLog.Info("PhysJoinFeeder: added complementary "+AICargo.GetName(otherCargo)+" stop at src joined to "+AIStation.GetName(srcStop.stationId));
+					} else {
+						HgLog.Warning("PhysJoinFeeder: BuildExec failed for complementary "+AICargo.GetName(otherCargo)+" near "+srcStop.stationGroup.GetName());
+					}
+				} else {
+					HgLog.Warning("PhysJoinFeeder: cannot find complementary "+AICargo.GetName(otherCargo)+" position near src "+srcStop.stationGroup.GetName());
+				}
+			}
+
+			local compDestStop = null;
+			local destCompTiles = AITileList_StationType(destStop.stationId, compStationType);
+			if(destCompTiles.Count() > 0) {
+				foreach(tile, _ in destCompTiles) {
+					if(!HgStation.tileStation.rawin(tile)) continue;
+					local hsId = HgStation.tileStation[tile];
+					if(!HgStation.worldInstances.rawin(hsId)) continue;
+					local hs = HgStation.worldInstances[hsId];
+					if(hs.cargo == otherCargo) { compDestStop = hs; break; }
+				}
+			} else {
+				local tempSg = StationGroup();
+				tempSg.AddHgStation(destStop);
+				local candidate = RoadStationFactory(otherCargo, true).CreateBest(tempSg, otherCargo, srcStop.platformTile);
+				if(candidate != null) {
+					candidate.place = destStop.place;
+					candidate.feederTargetSg = null;
+					if(candidate.BuildExec()) {
+						compDestStop = candidate;
+						HgLog.Info("PhysJoinFeeder: added complementary "+AICargo.GetName(otherCargo)+" stop at dest joined to "+AIStation.GetName(destStop.stationId));
+					} else {
+						HgLog.Warning("PhysJoinFeeder: BuildExec failed for complementary "+AICargo.GetName(otherCargo)+" near "+destStop.stationGroup.GetName());
+					}
+				} else {
+					HgLog.Warning("PhysJoinFeeder: cannot find complementary "+AICargo.GetName(otherCargo)+" position near dest "+destStop.stationGroup.GetName());
+				}
+			}
+
+			// Create companion support route if both stops resolved, and no feeder route
+			// for otherCargo already connects these two OpenTTD stations.
+			if(compSrcStop != null && compDestStop != null) {
+				local alreadyExists = false;
+				foreach(r in RoadRoute.instances) {
+					if(r.cargo == otherCargo && r.isSrcTransfer
+					   && r.srcHgStation != null && r.destHgStation != null
+					   && r.srcHgStation.stationId == compSrcStop.stationId
+					   && r.destHgStation.stationId == compDestStop.stationId) {
+						alreadyExists = true; break;
+					}
+				}
+				if(!alreadyExists) {
+					local otherRoute = RoadRoute();
+					otherRoute.cargo = otherCargo;
+					otherRoute.srcHgStation = compSrcStop;
+					otherRoute.destHgStation = compDestStop;
+					otherRoute.isTransfer = false;
+					otherRoute.isSrcTransfer = true;
+					otherRoute.isBiDirectional = true;
+					otherRoute.depot = depot;
+					otherRoute.useDepotOrder = true;
+					otherRoute.useServiceOrder = false;
+					otherRoute.Initialize();
+					otherRoute.SetPath(roadBuilder.path);
+					HogeAI.WaitForPrice(AIEngine.GetPrice(TownBus.GetStandardBusEngine(otherCargo)));
+					local otherVehicle = otherRoute.BuildVehicleFirst();
+					if(otherVehicle != null) {
+						otherRoute.UpdateSavedData();
+						RoadRoute.instances.push(otherRoute);
+						PlaceDictionary.Get().AddRoute(otherRoute);
+						HgLog.Info("PhysJoinFeeder: feeder "+AICargo.GetName(otherCargo)+" vehicle created");
+					} else {
+						HgLog.Warning("PhysJoinFeeder: BuildVehicle failed for "+AICargo.GetName(otherCargo));
+					}
+				}
+			}
+		}
+
+		// --- Bidirectional RoadRoute ---
+		local roadRoute = RoadRoute();
+		roadRoute.cargo = cargo;
+		roadRoute.srcHgStation = srcStop;
+		roadRoute.destHgStation = destStop;
+		roadRoute.isTransfer = false;
+		roadRoute.isSrcTransfer = true; // support route: exempt from profitability-based removal
+		roadRoute.isBiDirectional = true;
+		roadRoute.depot = depot;
+		roadRoute.useDepotOrder = true;
+		roadRoute.useServiceOrder = false;
+		roadRoute.Initialize();
+		roadRoute.SetPath(roadBuilder.path);
+
+		HogeAI.WaitForPrice(AIEngine.GetPrice(busEngine));
+		local vehicle = roadRoute.BuildVehicleFirst();
+		if(vehicle == null) {
+			HgLog.Warning("PhysJoinFeeder: BuildVehicle failed");
+			return false;
+		}
+		roadRoute.UpdateSavedData();
+		RoadRoute.instances.push(roadRoute);
+		PlaceDictionary.Get().AddRoute(roadRoute);
+		HgLog.Info("PhysJoinFeeder: feeder bus created "+newHgStation+" <-> "+existingSg.GetName());
+		return true;
 	}
 }
 
