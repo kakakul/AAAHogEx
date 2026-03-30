@@ -15,7 +15,7 @@ require("air.nut");
 
 
 class HogeAI extends AIController {
-	static version = 115;
+	static version = 2;
 
 	static container = Container();
 	static notBuildableList = AIList();
@@ -265,7 +265,7 @@ class HogeAI extends AIController {
 	
 	function Start() {
 		SetCompanyName();
-		HgLog.Info("AAAHogEx Started! version:"+HogeAI.version+" name:"+AICompany.GetName(AICompany.COMPANY_SELF));
+		HgLog.Info("HogNet Started! version:"+HogeAI.version+" name:"+AICompany.GetName(AICompany.COMPANY_SELF));
 		HgLog.Info("openttd version:"+openttdVersion);
 		
 		
@@ -4501,13 +4501,13 @@ class HogeAI extends AIController {
 
 	function SetCompanyName() {
 		AICompany.SetPresidentName("R. Ishibashi");
-		if(AICompany.GetName( AICompany.COMPANY_SELF ).find("AAAHogEx") != null) {
+		if(AICompany.GetName( AICompany.COMPANY_SELF ).find("HogNet and Son") != null) {
 			return;
 		}
 		local i = 0;
-	    if(!AICompany.SetName("AAAHogEx")) {
+	    if(!AICompany.SetName("HogNet and Son")) {
 			i = 2;
-			while(!AICompany.SetName("AAAHogEx #" + i)) {
+			while(!AICompany.SetName("HogNet and Son #" + i)) {
 				i = i + 1;
 				if(i > 255) break;
 			}
@@ -4809,7 +4809,7 @@ class HogeAI extends AIController {
 		for(local id = AICompany.COMPANY_FIRST; id<AICompany.COMPANY_LAST; id++) {
 			if(AICompany.ResolveCompanyID(id) != AICompany.COMPANY_INVALID) {
 				local name = AICompany.GetName(id);
-				if(name != null && name.find("AAAHogEx") != null) {
+				if(name != null && name.find("HogNet and Son") != null) {
 					if(AICompany.IsMine(id)) {
 						hogeIndex = hogeNum;
 					}

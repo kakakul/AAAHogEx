@@ -3,131 +3,131 @@
    function GetAuthor()      { return "kakakul"; }
    function GetName()        { return "HogNet"; }
    function GetDescription() { return "HogNet was forked from AAAHogEx, retaining most of the logic, but forcing the AI to build a single large network and connecting all towns no matter how small. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes."; }
-   function GetVersion()     { return 2; }
-   function MinVersionToLoad() { return 1; }
+   function GetVersion()     { return 2; }	// also change in main.nut
+   function MinVersionToLoad() { return 2; }
    function GetDate()        { return "2026-03-30"; }
    function CreateInstance() { return "HogeAI"; }
    function GetShortName()   { return "HOGN"; }
    function GetAPIVersion()    { return "14"; }
-   
+
    function GetSettings() {
 		AddSetting({name = "usable_cargos",
-			description = "Types of cargo usable", 
+			description = "Types of cargo usable",
 			//default_value = 3,
-			easy_value = 3, 
-			medium_value = 3, 
-			hard_value = 3, 
-			custom_value = 3, 
-			min_value = 1, 
+			easy_value = 3,
+			medium_value = 3,
+			hard_value = 3,
+			custom_value = 3,
+			min_value = 1,
 			max_value = 3,
-			flags = CONFIG_INGAME});			
+			flags = CONFIG_INGAME});
 
 		AddLabels("usable_cargos",
 			{_1 = "Pax and mail only", _2="Freight only", _3="All"});
 
 
 		AddSetting({name = "disable_veh_train",
-			description = "Disable trains", 
+			description = "Disable trains",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "disable_veh_roadveh",
-			description = "Disable road vehicles", 
+			description = "Disable road vehicles",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
-			
+
 		AddSetting({name = "disable_veh_tram",
-			description = "Disable trams", 
+			description = "Disable trams",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
-			
+
 		AddSetting({name = "disable_veh_ship",
-			description = "Disable ships", 
+			description = "Disable ships",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
-			
+
 		AddSetting({name = "disable_veh_aircraft",
-			description = "Disable aircrafts", 
+			description = "Disable aircrafts",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
 		AddSetting({name = "Avoid removing water",
-			description = "Avoid removing water (To prevent this AI from blocking the path of other players'ships)", 
+			description = "Avoid removing water (To prevent this AI from blocking the path of other players'ships)",
 			//default_value = 1,
-			easy_value = 1, 
-			medium_value = 1, 
-			hard_value = 0, 
-			custom_value = 1, 
+			easy_value = 1,
+			medium_value = 1,
+			hard_value = 0,
+			custom_value = 1,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "IsAvoidSecondaryIndustryStealing",
 			description = "Avoid secondary industry stealing",
 			//default_value = 0,
-			easy_value = 1, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 1,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
 		AddSetting({name = "IsAvoidExtendCoverageAreaInTowns",
-			description = "Avoid joining stations solely to extend coverage area in towns", 
+			description = "Avoid joining stations solely to extend coverage area in towns",
 			//default_value = 0,
-			easy_value = 1, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 1,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "IsPreferReusingExistingRoads",
-			description = "Prefer reusing existing roads. Before building new roads, the AI checks whether existing roads can be used. This helps prevent the map from becoming cluttered with too many roads.", 
+			description = "Prefer reusing existing roads. Before building new roads, the AI checks whether existing roads can be used. This helps prevent the map from becoming cluttered with too many roads.",
 			//default_value = 0,
-			easy_value = 1, 
+			easy_value = 1,
 			medium_value = 1,
-			hard_value = 0, 
-			custom_value = 0, 
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
-			
+
 		AddSetting({name = "IsForceToHandleFright",
-			description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)", 
+			description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)",
 			//default_value = 0,
-			easy_value = 1, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 1,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "disable_prefixed_station_name",
-			description = "Disable prefixed station names", 
+			description = "Disable prefixed station names",
 			//default_value = 0,
-			easy_value = 0, 
-			medium_value = 0, 
-			hard_value = 0, 
-			custom_value = 0, 
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
-				 
+
 		AddSetting({name = "IsDebug",
 			description = "Debug",
 			//default_value = 0,
@@ -150,5 +150,5 @@
 			{_0 = "AAAHogEx (profit-first)", _1 = "HogNet (connect all towns)"});
 	}
  }
- 
+
  RegisterAI(HogeAI());
