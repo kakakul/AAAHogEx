@@ -2890,7 +2890,7 @@ class TrainRouteBuilder extends RouteBuilder {
 	function BuildRoute(dest, src, cargo, options) {
 		local distance = AIMap.DistanceManhattan(src.GetLocation(), dest.GetLocation());
 		local isTransfer = options.rawin("transfer") ? options.transfer : (dest instanceof StationGroup);
-		local isSingleOrNot = (options.rawin("notUseSingle") && options.notUseSingle) || (src instanceof Place && src.IsProcessing()) ? false : null;
+		local isSingleOrNot = (options.rawin("notUseSingle") && options.notUseSingle) || (src instanceof Place && src.IsProcessing()) || (CargoUtils.IsPaxOrMail(cargo) && HogeAI.Get().IsNetworkMode()) ? false : null;
 		if(isSingleOrNot==null && options.rawin("estimate")) {
 			isSingleOrNot = options.estimate.isSingle;
 		}
