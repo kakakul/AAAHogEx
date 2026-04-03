@@ -138,16 +138,13 @@
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "network_mode",
-			description = "Network mode: connect all towns into a single network (HogNet) or use original profit-first behavior (AAAHogEx)",
+			description = "Network mode: connect all towns into a single network, while freight lines will share rail infrastructure.",
 			//default_value = 1,
 			easy_value = 1,
 			medium_value = 1,
 			hard_value = 1,
 			custom_value = 1,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
-
-		AddLabels("network_mode",
-			{_0 = "AAAHogEx (profit-first)", _1 = "HogNet (connect all towns)"});
 	}
  }
 
