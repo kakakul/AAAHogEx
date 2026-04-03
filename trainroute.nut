@@ -10,8 +10,35 @@ class TrainRoute extends Route {
 	static RT_RETURN = 3;
 	
 	static USED_RATE_LIMIT = 20;
-	
-	
+
+	static used = {}; // freight rail tile registry: tile -> reference count
+
+	static function AddUsedTile(tile) {
+		local cnt = 1;
+		if(TrainRoute.used.rawin(tile)) {
+			cnt = TrainRoute.used[tile] + 1;
+		}
+		TrainRoute.used.rawset(tile, cnt);
+	}
+
+	static function RemoveUsedTile(tile) {
+		if(TrainRoute.used.rawin(tile)) {
+			local cnt = TrainRoute.used[tile] - 1;
+			if(cnt >= 1) {
+				TrainRoute.used.rawset(tile, cnt);
+				return false;
+			} else {
+				TrainRoute.used.rawdelete(tile);
+			}
+		}
+		return true;
+	}
+
+	static function IsUsedTile(tile) {
+		return TrainRoute.used.rawin(tile) && TrainRoute.used[tile] >= 1;
+	}
+
+
 	static function SaveStatics(data) {
 		local arr = [];
 		foreach(route in TrainRoute.instances) {
@@ -32,6 +59,7 @@ class TrainRoute extends Route {
 		data.removedTrainRoute <- arr; //いまのところIsInfrastractureMaintenance:trueの時しか使用されない
 		
 		data.unsuitableEngineWagons <- TrainRoute.unsuitableEngineWagons;
+		data.trainUsed <- TrainRoute.used;
 	}
 	
 	static function LoadFrom(t) {
@@ -164,6 +192,11 @@ class TrainRoute extends Route {
 
 		TrainRoute.unsuitableEngineWagons.clear();
 		HgTable.Extend(TrainRoute.unsuitableEngineWagons, data.unsuitableEngineWagons);
+
+		TrainRoute.used.clear();
+		if(data.rawin("trainUsed")) {
+			HgTable.Extend(TrainRoute.used, data.trainUsed);
+		}
 	}
 	
 	static function GetAll() {
@@ -1918,6 +1951,16 @@ class TrainRoute extends Route {
 	function Demolish() { // ScanRoutesから呼ばれる
 		HgLog.Warning("Demolish " + this);
 		local execMode = AIExecMode();
+		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+			foreach(tile in pathSrcToDest.array_) {
+				TrainRoute.RemoveUsedTile(tile);
+			}
+			if(pathDestToSrc != null) {
+				foreach(tile in pathDestToSrc.array_) {
+					TrainRoute.RemoveUsedTile(tile);
+				}
+			}
+		}
 		srcHgStation.RemoveIfNotUsed();
 		foreach(station in destHgStations) {
 			station.RemoveIfNotUsed();
@@ -3148,7 +3191,18 @@ class TrainRouteBuilder extends RouteBuilder {
 
 		TrainRoute.instances.push(route);
 		PlaceDictionary.Get().AddRoute(route);
-		
+
+		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+			foreach(tile in route.pathSrcToDest.array_) {
+				TrainRoute.AddUsedTile(tile);
+			}
+			if(route.pathDestToSrc != null) {
+				foreach(tile in route.pathDestToSrc.array_) {
+					TrainRoute.AddUsedTile(tile);
+				}
+			}
+		}
+
 		if(CargoUtils.IsPaxOrMail(cargo)) {
 			CommonRouteBuilder.CheckTownTransfer(route, srcHgStation);
 			CommonRouteBuilder.CheckTownTransfer(route, destHgStation);
