@@ -4543,6 +4543,7 @@ class HogeAI extends AIController {
 			AICompany.SetMinimumLoanAmount(0);
 		}
 		local first = true;
+		local logged = false;
 		self.waitForPriceStartDate = AIDate.GetCurrentDate();
 		while(AICompany.GetBankBalance(AICompany.COMPANY_SELF) < needMoney + buffer) {
 			if(first) {
@@ -4554,8 +4555,11 @@ class HogeAI extends AIController {
 					self.supressInterval = oldSupressInterval;
 					return false;
 				}
-			
-				HgLog.Info("wait for money:"+needMoney+" "+reason);
+
+				if(!logged) {
+					HgLog.Info("wait for money:"+needMoney+" "+reason);
+					logged = true;
+				}
 				local emergency = HogeAI.GetUsableMoney() < 0;
 				foreach(route in Route.GetAllRoutes()) {
 					if(route.isBuilding) continue; // first buildの最中に呼ばれて、first vehicleがsellされる事がある

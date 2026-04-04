@@ -209,7 +209,7 @@ class RailPathFinder
 			path = _FindPath(50);
 			PerformanceCounter.Print();
 			counter++;
-			HgLog.Info("counter:"+counter);
+			//HgLog.Info("counter:"+counter);
 			local intervalStartDate = AIDate.GetCurrentDate();
 			if(path == false && eventPoller != null && eventPoller.OnPathFindingInterval()==false) {
 				HgLog.Info("TrainRoute: FindPath break by OnPathFindingInterval");
