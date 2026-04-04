@@ -3153,3 +3153,108 @@ class RailRemover extends Construction {
 }
 
 Construction.nameClass.RailRemover <- RailRemover;
+
+class FourWayJunction {
+	/*
+	Flat 4-way crossing for two perpendicular double-track lines.
+	originTile is the NW tile of the 2×2 crossing grid.
+
+	Line A runs along y (NW_SE): x=0 southbound, x=1 northbound
+	Line B runs along x (NE_SW): y=0 eastbound,  y=1 westbound
+
+	    x=-2 x=-1 x=0  x=1  x=2 x=3
+	y=-2:         |    |
+	y=-1:        [S]  [S]
+	y=0:  --[S]--[C]--[C]--[S]--
+	y=1:  --[S]--[C]--[C]--[S]--
+	y=2:        [S]  [S]
+	y=3:         |    |
+
+	S = PBS one-way signal
+	C = crossing tile (NW_SE and NE_SW track on same tile)
+	*/
+	originTile = null;
+
+	constructor(tile) {
+		this.originTile = tile;
+	}
+
+	function At(x, y) {
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + x,
+			AIMap.GetTileY(originTile) + y);
+	}
+
+	function GetRails() {
+		return [
+			// NW_SE (y-direction) through the 2x2 crossing area
+			[[0,-1],[0,0],[0,1]],
+			[[0,0],[0,1],[0,2]],
+			[[1,-1],[1,0],[1,1]],
+			[[1,0],[1,1],[1,2]],
+			// NE_SW (x-direction) through the 2x2 crossing area
+			[[-1,0],[0,0],[1,0]],
+			[[0,0],[1,0],[2,0]],
+			[[-1,1],[0,1],[1,1]],
+			[[0,1],[1,1],[2,1]],
+			// One approach tile on each side (signal anchor)
+			[[0,-2],[0,-1],[0,0]],
+			[[1,-2],[1,-1],[1,0]],
+			[[0,1],[0,2],[0,3]],
+			[[1,1],[1,2],[1,3]],
+			[[-2,0],[-1,0],[0,0]],
+			[[-2,1],[-1,1],[0,1]],
+			[[1,0],[2,0],[3,0]],
+			[[1,1],[2,1],[3,1]],
+		];
+	}
+
+	function GetRequiredTiles() {
+		// All tiles that must be buildable: 2x2 crossing + all approach stubs
+		return [
+			[0,0],[1,0],[0,1],[1,1],    // crossing
+			[0,-1],[1,-1],[0,2],[1,2],  // NS approach
+			[-1,0],[-1,1],[2,0],[2,1],  // EW approach (signal tiles)
+			[0,-2],[1,-2],[0,3],[1,3],  // NS outer approach
+			[-2,0],[-2,1],[3,0],[3,1],  // EW outer approach
+		];
+	}
+
+	function Build(isTestMode = true) {
+		foreach(xy in GetRequiredTiles()) {
+			if(!HogeAI.IsBuildable(At(xy[0], xy[1]))) {
+				if(!isTestMode) {
+					HgLog.Warning("FourWayJunction.Build: not buildable at "
+						+ HgTile(At(xy[0], xy[1])));
+				}
+				return false;
+			}
+		}
+		if(isTestMode) return true;
+
+		foreach(r in GetRails()) {
+			if(!RailBuilder.BuildRailSafe(
+					At(r[0][0], r[0][1]),
+					At(r[1][0], r[1][1]),
+					At(r[2][0], r[2][1]))) {
+				HgLog.Warning("FourWayJunction.Build: track failed at "
+					+ HgTile(At(r[1][0], r[1][1])));
+				return false;
+			}
+		}
+		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		// NS line entering from north
+		BuildUtils.BuildSignalSafe(At(0,-1), At(0,0), pbs);
+		BuildUtils.BuildSignalSafe(At(1,-1), At(1,0), pbs);
+		// NS line entering from south
+		BuildUtils.BuildSignalSafe(At(0,2),  At(0,1), pbs);
+		BuildUtils.BuildSignalSafe(At(1,2),  At(1,1), pbs);
+		// EW line entering from west
+		BuildUtils.BuildSignalSafe(At(-1,0), At(0,0), pbs);
+		BuildUtils.BuildSignalSafe(At(-1,1), At(0,1), pbs);
+		// EW line entering from east
+		BuildUtils.BuildSignalSafe(At(2,0),  At(1,0), pbs);
+		BuildUtils.BuildSignalSafe(At(2,1),  At(1,1), pbs);
+		return true;
+	}
+}
