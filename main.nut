@@ -982,6 +982,7 @@ class HogeAI extends AIController {
 	}
 
 	function ConnectUnservedTowns() {
+		if(IsFreightOnly()) return;
 		if(GetUsableMoney() < GetInflatedMoney(100000)) return;
 
 		local paxCargo = GetPassengerCargo();
