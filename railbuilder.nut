@@ -3156,81 +3156,121 @@ Construction.nameClass.RailRemover <- RailRemover;
 
 class FourWayJunction {
 	/*
-	Flat 4-way crossing for two perpendicular double-track lines.
-	originTile is the NW tile of the 2×2 crossing grid.
+	Y-junction: double-track main line (N-S) splits into two diagonal branches.
+	originTile is the NW tile of the 2×1 switch area at y=0.
 
-	Line A runs along y (NW_SE): x=0 southbound, x=1 northbound
-	Line B runs along x (NE_SW): y=0 eastbound,  y=1 westbound
+	flipped=false: main approaches from NORTH (station is north, route goes south).
+	flipped=true:  main approaches from SOUTH (station is south, route goes north).
+	              (achieved by mirroring y-coordinates in At())
 
 	    x=-2 x=-1 x=0  x=1  x=2 x=3
 	y=-2:         |    |
-	y=-1:        [S]  [S]
-	y=0:  --[S]--[C]--[C]--[S]--
-	y=1:  --[S]--[C]--[C]--[S]--
-	y=2:        [S]  [S]
-	y=3:         |    |
+	y=-1:        [S]  [S]          <- main approach signals
+	y= 0:        [J]  [J]          <- switch tiles (N->SW and N->SE curves)
+	y=+1:       [S][S][S][S]       <- branch approach signals
+	y=+2:      /    \/    \
+	          /    /  \    \
+	      [-2,2][-1,2] [2,2][3,2]  <- branch outer approach
 
-	S = PBS one-way signal
-	C = crossing tile (NW_SE and NE_SW track on same tile)
+	Left branch  (SW): tiles (-1,1),(-2,2) and (0,1),(-1,2)
+	Right branch (SE): tiles (1,1),(2,2)   and (2,1),(3,2)
+	S = PBS one-way signal, J = switch tile
 	*/
 	originTile = null;
+	flipped = null;
 
-	constructor(tile) {
+	constructor(tile, flipped_ = false) {
 		this.originTile = tile;
+		this.flipped = flipped_;
 	}
 
 	function At(x, y) {
+		local actualY = flipped ? -y : y;
 		return AIMap.GetTileIndex(
 			AIMap.GetTileX(originTile) + x,
-			AIMap.GetTileY(originTile) + y);
+			AIMap.GetTileY(originTile) + actualY);
 	}
 
 	function GetRails() {
 		return [
-			// NW_SE (y-direction) through the 2x2 crossing area
-			[[0,-1],[0,0],[0,1]],
-			[[0,0],[0,1],[0,2]],
-			[[1,-1],[1,0],[1,1]],
-			[[1,0],[1,1],[1,2]],
-			// NE_SW (x-direction) through the 2x2 crossing area
-			[[-1,0],[0,0],[1,0]],
-			[[0,0],[1,0],[2,0]],
-			[[-1,1],[0,1],[1,1]],
-			[[0,1],[1,1],[2,1]],
-			// One approach tile on each side (signal anchor)
+			// Main approach (N-S, from north)
 			[[0,-2],[0,-1],[0,0]],
 			[[1,-2],[1,-1],[1,0]],
-			[[0,1],[0,2],[0,3]],
-			[[1,1],[1,2],[1,3]],
-			[[-2,0],[-1,0],[0,0]],
-			[[-2,1],[-1,1],[0,1]],
-			[[1,0],[2,0],[3,0]],
-			[[1,1],[2,1],[3,1]],
+			// Switch tiles: N -> left branch (SW diagonal)
+			[[0,-1],[0,0],[-1,1]],
+			[[1,-1],[1,0],[0,1]],
+			// Switch tiles: N -> right branch (SE diagonal)
+			[[0,-1],[0,0],[1,1]],
+			[[1,-1],[1,0],[2,1]],
+			// Left branch approach (SW diagonal)
+			[[0,0],[-1,1],[-2,2]],
+			[[1,0],[0,1],[-1,2]],
+			// Right branch approach (SE diagonal)
+			[[0,0],[1,1],[2,2]],
+			[[1,0],[2,1],[3,2]],
 		];
 	}
 
 	function GetRequiredTiles() {
-		// All tiles that must be buildable: 2x2 crossing + all approach stubs
 		return [
-			[0,0],[1,0],[0,1],[1,1],    // crossing
-			[0,-1],[1,-1],[0,2],[1,2],  // NS approach
-			[-1,0],[-1,1],[2,0],[2,1],  // EW approach (signal tiles)
-			[0,-2],[1,-2],[0,3],[1,3],  // NS outer approach
-			[-2,0],[-2,1],[3,0],[3,1],  // EW outer approach
+			[0,0],[1,0],            // switch tiles
+			[0,-1],[1,-1],          // main signal approach
+			[0,-2],[1,-2],          // main outer approach
+			[-1,1],[0,1],           // left branch signal approach
+			[-2,2],[-1,2],          // left branch outer
+			[1,1],[2,1],            // right branch signal approach
+			[2,2],[3,2],            // right branch outer
 		];
 	}
 
-	function Build(isTestMode = true) {
+	// Collect all signals on tiles within the junction footprint, remove them,
+	// and return an array of [tile, facing, type] for later restoration.
+	// OpenTTD won't let you add a new track direction to a signaled tile,
+	// so signals must be cleared before BuildRailSafe is called.
+	function CollectAndRemoveSignals() {
+		local mapW = AIMap.GetMapSizeX();
+		local saved = [];
 		foreach(xy in GetRequiredTiles()) {
-			if(!HogeAI.IsBuildable(At(xy[0], xy[1]))) {
+			local t = At(xy[0], xy[1]);
+			if(!AIRail.IsRailTile(t)) continue;
+			local neighbors = [t + 1, t - 1, t + mapW, t - mapW];
+			foreach(nb in neighbors) {
+				if(!AIMap.IsValidTile(nb)) continue;
+				local stype = AIRail.GetSignalType(t, nb);
+				if(stype != AIRail.SIGNALTYPE_NONE) {
+					saved.push([t, nb, stype]);
+					BuildUtils.RemoveSignalSafe(t, nb);
+				}
+			}
+		}
+		return saved;
+	}
+
+	function RestoreSignals(saved) {
+		foreach(sig in saved) {
+			BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
+		}
+	}
+
+	function Build(isTestMode = true) {
+		// Signaled tiles ARE rail tiles, so IsRailTile passes them — test mode
+		// is not affected by existing signals.  The build step must remove them
+		// first (see CollectAndRemoveSignals) because OpenTTD won't add a new
+		// track direction to a tile that carries a signal.
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
 				if(!isTestMode) {
 					HgLog.Warning("FourWayJunction.Build: not buildable at "
-						+ HgTile(At(xy[0], xy[1])));
+						+ HgTile(t));
 				}
 				return false;
 			}
 		}
 		if(isTestMode) return true;
+
+		// Remove existing signals before laying new track directions.
+		local savedSignals = CollectAndRemoveSignals();
 
 		foreach(r in GetRails()) {
 			if(!RailBuilder.BuildRailSafe(
@@ -3239,22 +3279,61 @@ class FourWayJunction {
 					At(r[2][0], r[2][1]))) {
 				HgLog.Warning("FourWayJunction.Build: track failed at "
 					+ HgTile(At(r[1][0], r[1][1])));
+				RestoreSignals(savedSignals);
 				return false;
 			}
 		}
 		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
-		// NS line entering from north
+		// Main approach (from north)
 		BuildUtils.BuildSignalSafe(At(0,-1), At(0,0), pbs);
 		BuildUtils.BuildSignalSafe(At(1,-1), At(1,0), pbs);
-		// NS line entering from south
-		BuildUtils.BuildSignalSafe(At(0,2),  At(0,1), pbs);
-		BuildUtils.BuildSignalSafe(At(1,2),  At(1,1), pbs);
-		// EW line entering from west
-		BuildUtils.BuildSignalSafe(At(-1,0), At(0,0), pbs);
-		BuildUtils.BuildSignalSafe(At(-1,1), At(0,1), pbs);
-		// EW line entering from east
-		BuildUtils.BuildSignalSafe(At(2,0),  At(1,0), pbs);
-		BuildUtils.BuildSignalSafe(At(2,1),  At(1,1), pbs);
+		// Left branch approach (from SW)
+		BuildUtils.BuildSignalSafe(At(-1,1), At(0,0), pbs);
+		BuildUtils.BuildSignalSafe(At(0,1),  At(1,0), pbs);
+		// Right branch approach (from SE)
+		BuildUtils.BuildSignalSafe(At(1,1),  At(0,0), pbs);
+		BuildUtils.BuildSignalSafe(At(2,1),  At(1,0), pbs);
 		return true;
+	}
+
+	// Scan mainTiles[minDist..maxDist] for a N-S straight section with an
+	// adjacent parallel tile, then test-build a Y-junction there.
+	// flipped orientation is chosen based on which direction is away from station.
+	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist) {
+		local p2Set = {};
+		foreach(t in parallelTiles) p2Set.rawset(t, true);
+		local mapW = AIMap.GetMapSizeX();
+
+		for(local i = minDist; i <= maxDist && i < mainTiles.len() - 1; i++) {
+			local t1 = mainTiles[i];
+			local dx = AIMap.GetTileX(t1) - AIMap.GetTileX(mainTiles[i - 1]);
+			local dy = AIMap.GetTileY(t1) - AIMap.GetTileY(mainTiles[i - 1]);
+			// Only handle N-S straight sections (dx=0, dy=±1)
+			if(dx != 0 || dy == 0) continue;
+
+			local t2 = null;
+			local neighbors = [t1 + 1, t1 - 1, t1 + mapW, t1 - mapW];
+			foreach(nb in neighbors) {
+				if(p2Set.rawin(nb)) { t2 = nb; break; }
+			}
+			if(t2 == null) continue;
+
+			// Origin = NW corner of the two parallel switch tiles
+			local origin = AIMap.GetTileIndex(
+				min(AIMap.GetTileX(t1), AIMap.GetTileX(t2)),
+				min(AIMap.GetTileY(t1), AIMap.GetTileY(t2)));
+
+			// dy>0: going south away from station => station is north => flipped=false
+			// dy<0: going north away from station => station is south => flipped=true
+			local flipped = (dy < 0);
+			local j = FourWayJunction(origin, flipped);
+			if(j.Build(true)) {
+				j.Build(false);
+				HgLog.Info("FourWayJunction built at " + HgTile(origin)
+					+ " flipped=" + flipped);
+				return true;
+			}
+		}
+		return false;
 	}
 }
