@@ -3203,6 +3203,17 @@ class TrainRouteBuilder extends RouteBuilder {
 			}
 		}
 
+		// For long double-tracked freight routes, add a Y-junction
+		// 2-30 tiles from each station to enable future network connections.
+		if(!useSingle && !CargoUtils.IsPaxOrMail(cargo)
+				&& route.pathDestToSrc != null
+				&& route.pathSrcToDest.array_.len() > 40) {
+			local arr1 = route.pathSrcToDest.array_;
+			local arr2 = route.pathDestToSrc.array_;
+			FourWayJunction.TryBuildNearStation(arr1, arr2, 2, 30);
+			FourWayJunction.TryBuildNearStation(arr2, arr1, 2, 30);
+		}
+
 		if(CargoUtils.IsPaxOrMail(cargo)) {
 			CommonRouteBuilder.CheckTownTransfer(route, srcHgStation);
 			CommonRouteBuilder.CheckTownTransfer(route, destHgStation);

@@ -3157,24 +3157,22 @@ Construction.nameClass.RailRemover <- RailRemover;
 class FourWayJunction {
 	/*
 	Y-junction: double-track main line (N-S) splits into two diagonal branches.
-	originTile is the NW tile of the 2×1 switch area at y=0.
-
+	originTile is the NW tile of the 2x1 switch area at y=0.
 	flipped=false: main approaches from NORTH (station is north, route goes south).
 	flipped=true:  main approaches from SOUTH (station is south, route goes north).
-	              (achieved by mirroring y-coordinates in At())
+	              (y-coordinates are mirrored in At())
 
-	    x=-2 x=-1 x=0  x=1  x=2 x=3
-	y=-2:         |    |
-	y=-1:        [S]  [S]          <- main approach signals
-	y= 0:        [J]  [J]          <- switch tiles (N->SW and N->SE curves)
-	y=+1:       [S][S][S][S]       <- branch approach signals
-	y=+2:      /    \/    \
-	          /    /  \    \
-	      [-2,2][-1,2] [2,2][3,2]  <- branch outer approach
+	Layout (flipped=false):
+	    x=-2  x=-1  x=0   x=1   x=2   x=3
+	y=-2:      (0,-2)(1,-2)                    <- main track (existing)
+	y=-1:     S(0,-1)(1,-1)S                   <- PBS signal approach
+	y= 0: (-1,0)(0,0)(1,0)(2,0)               <- switch row: curves added here
+	y=+1: (-2,1)(-1,1)      (2,1)(3,1)        <- first diagonal step
+	y=+2: (-2,2)                   (3,2)       <- branch endpoints
 
-	Left branch  (SW): tiles (-1,1),(-2,2) and (0,1),(-1,2)
-	Right branch (SE): tiles (1,1),(2,2)   and (2,1),(3,2)
-	S = PBS one-way signal, J = switch tile
+	Left  branch (SW): (0,0)->(-1,0)->(-1,1)->(-2,1)->(-2,2)
+	Right branch (SE): (1,0)->(2,0)->(2,1)->(3,1)->(3,2)
+	All BuildRail calls use only Manhattan-adjacent tile triples.
 	*/
 	originTile = null;
 	flipped = null;
@@ -3191,42 +3189,48 @@ class FourWayJunction {
 			AIMap.GetTileY(originTile) + actualY);
 	}
 
+	// Returns [prev,cur,next] triples for AIRail.BuildRail.
+	// Every triple uses only adjacent (Manhattan distance=1) tiles.
 	function GetRails() {
 		return [
-			// Main approach (N-S, from north)
+			// Main approach (N-S straight, reinforce existing track)
 			[[0,-2],[0,-1],[0,0]],
 			[[1,-2],[1,-1],[1,0]],
-			// Switch tiles: N -> left branch (SW diagonal)
-			[[0,-1],[0,0],[-1,1]],
-			[[1,-1],[1,0],[0,1]],
-			// Switch tiles: N -> right branch (SE diagonal)
-			[[0,-1],[0,0],[1,1]],
-			[[1,-1],[1,0],[2,1]],
-			// Left branch approach (SW diagonal)
-			[[0,0],[-1,1],[-2,2]],
-			[[1,0],[0,1],[-1,2]],
-			// Right branch approach (SE diagonal)
-			[[0,0],[1,1],[2,2]],
-			[[1,0],[2,1],[3,2]],
+			// Left diverge: (0,0) curves west to (-1,0)
+			[[0,-1],[0,0],[-1,0]],
+			// (-1,0) curves south to (-1,1)
+			[[0,0],[-1,0],[-1,1]],
+			// (-1,1) curves west to (-2,1)
+			[[-1,0],[-1,1],[-2,1]],
+			// (-2,1) curves south to (-2,2)
+			[[-1,1],[-2,1],[-2,2]],
+			// Right diverge: (1,0) curves east to (2,0)
+			[[1,-1],[1,0],[2,0]],
+			// (2,0) curves south to (2,1)
+			[[1,0],[2,0],[2,1]],
+			// (2,1) curves east to (3,1)
+			[[2,0],[2,1],[3,1]],
+			// (3,1) curves south to (3,2)
+			[[2,1],[3,1],[3,2]],
 		];
 	}
 
 	function GetRequiredTiles() {
 		return [
-			[0,0],[1,0],            // switch tiles
-			[0,-1],[1,-1],          // main signal approach
-			[0,-2],[1,-2],          // main outer approach
-			[-1,1],[0,1],           // left branch signal approach
-			[-2,2],[-1,2],          // left branch outer
-			[1,1],[2,1],            // right branch signal approach
-			[2,2],[3,2],            // right branch outer
+			[0,0],[1,0],           // switch tiles (on main line)
+			[0,-1],[1,-1],         // main signal approach (on main line)
+			[0,-2],[1,-2],         // main outer approach (on main line)
+			[-1,0],                // left branch step 1
+			[-1,1],[-2,1],         // left branch steps 2-3
+			[-2,2],                // left branch endpoint
+			[2,0],                 // right branch step 1
+			[2,1],[3,1],           // right branch steps 2-3
+			[3,2],                 // right branch endpoint
 		];
 	}
 
-	// Collect all signals on tiles within the junction footprint, remove them,
-	// and return an array of [tile, facing, type] for later restoration.
-	// OpenTTD won't let you add a new track direction to a signaled tile,
-	// so signals must be cleared before BuildRailSafe is called.
+	// Collect all signals on junction tiles, remove them, return saved state.
+	// OpenTTD won't add a new track direction to a signaled tile.
 	function CollectAndRemoveSignals() {
 		local mapW = AIMap.GetMapSizeX();
 		local saved = [];
@@ -3238,6 +3242,8 @@ class FourWayJunction {
 				if(!AIMap.IsValidTile(nb)) continue;
 				local stype = AIRail.GetSignalType(t, nb);
 				if(stype != AIRail.SIGNALTYPE_NONE) {
+					HgLog.Info("FourWayJunction: removing signal at " + HgTile(t)
+						+ " facing " + HgTile(nb) + " type=" + stype);
 					saved.push([t, nb, stype]);
 					BuildUtils.RemoveSignalSafe(t, nb);
 				}
@@ -3248,92 +3254,167 @@ class FourWayJunction {
 
 	function RestoreSignals(saved) {
 		foreach(sig in saved) {
+			HgLog.Info("FourWayJunction: restoring signal at " + HgTile(sig[0])
+				+ " facing " + HgTile(sig[1]) + " type=" + sig[2]);
 			BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
 		}
 	}
 
 	function Build(isTestMode = true) {
-		// Signaled tiles ARE rail tiles, so IsRailTile passes them — test mode
-		// is not affected by existing signals.  The build step must remove them
-		// first (see CollectAndRemoveSignals) because OpenTTD won't add a new
-		// track direction to a tile that carries a signal.
 		foreach(xy in GetRequiredTiles()) {
 			local t = At(xy[0], xy[1]);
 			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
-				if(!isTestMode) {
-					HgLog.Warning("FourWayJunction.Build: not buildable at "
-						+ HgTile(t));
-				}
+				HgLog.Info("FourWayJunction.Build: blocked at [" + xy[0] + "," + xy[1]
+					+ "] " + HgTile(t) + (isTestMode ? " (test)" : " (real)"));
 				return false;
 			}
 		}
+
 		if(isTestMode) return true;
 
-		// Remove existing signals before laying new track directions.
+		// Flatten branch tiles to match the existing main-line switch tile height.
+		// Skipped in test mode: LevelAverage calls RaiseTile unconditionally regardless
+		// of isTestMode, so it would terraform for real during the Build(true) pass.
+		// The levelOk check in TryBuildNearStation already screens for flat track sections.
+		local branchTiles = [
+			At(-1, 0), At(-1, 1), At(-2, 1), At(-2, 2),
+			At( 2, 0), At( 2, 1), At( 3, 1), At( 3, 2)
+		];
+		local tileList = TileListUtils.GetLevelTileList(branchTiles);
+		tileList.Valuate(AITile.GetCornerHeight, AITile.CORNER_N);
+		local trackHeight = AITile.GetMinHeight(At(0, 0));
+		if(!TileListUtils.LevelAverage(tileList, AIRail.RAILTRACK_NW_SE, false, trackHeight)) {
+			HgLog.Warning("FourWayJunction.Build: LevelTiles failed");
+			return false;
+		}
+
 		local savedSignals = CollectAndRemoveSignals();
+		local builtRails = [];
 
 		foreach(r in GetRails()) {
-			if(!RailBuilder.BuildRailSafe(
-					At(r[0][0], r[0][1]),
-					At(r[1][0], r[1][1]),
-					At(r[2][0], r[2][1]))) {
-				HgLog.Warning("FourWayJunction.Build: track failed at "
-					+ HgTile(At(r[1][0], r[1][1])));
+			local a = At(r[0][0], r[0][1]);
+			local b = At(r[1][0], r[1][1]);
+			local c = At(r[2][0], r[2][1]);
+			if(RailBuilder.BuildRailSafe(a, b, c)) {
+				builtRails.push([a, b, c]);
+			} else if(AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) {
+				// Track piece already exists -- fine for main-line tiles.
+				HgLog.Info("FourWayJunction.Build: already built at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b) + " (ok)");
+			} else {
+				HgLog.Warning("FourWayJunction.Build: rail failed at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b)
+					+ " (from " + HgTile(a) + " to " + HgTile(c) + ")"
+					+ " err=" + AIError.GetLastErrorString());
+				// Remove all rails built so far to leave no partial track.
+				foreach(built in builtRails) {
+					AIRail.RemoveRail(built[0], built[1], built[2]);
+				}
 				RestoreSignals(savedSignals);
 				return false;
 			}
 		}
 		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
-		// Main approach (from north)
+		// Main approach signals (facing south into junction)
 		BuildUtils.BuildSignalSafe(At(0,-1), At(0,0), pbs);
 		BuildUtils.BuildSignalSafe(At(1,-1), At(1,0), pbs);
-		// Left branch approach (from SW)
-		BuildUtils.BuildSignalSafe(At(-1,1), At(0,0), pbs);
-		BuildUtils.BuildSignalSafe(At(0,1),  At(1,0), pbs);
-		// Right branch approach (from SE)
-		BuildUtils.BuildSignalSafe(At(1,1),  At(0,0), pbs);
-		BuildUtils.BuildSignalSafe(At(2,1),  At(1,0), pbs);
+		// Left branch approach signal: at (-1,0) facing (0,0) -- adjacent
+		BuildUtils.BuildSignalSafe(At(-1,0), At(0,0), pbs);
+		// Right branch approach signal: at (2,0) facing (1,0) -- adjacent
+		BuildUtils.BuildSignalSafe(At(2,0), At(1,0), pbs);
+		HgLog.Info("FourWayJunction: signals placed at origin " + HgTile(originTile)
+			+ " flipped=" + flipped);
 		return true;
 	}
 
-	// Scan mainTiles[minDist..maxDist] for a N-S straight section with an
-	// adjacent parallel tile, then test-build a Y-junction there.
-	// flipped orientation is chosen based on which direction is away from station.
+	// Scan mainTiles[minDist..maxDist] for a 5-tile window that is:
+	//   (a) straight N-S with consistent direction across all 5 tiles, and
+	//   (b) running side-by-side with parallelTiles at a consistent x-offset.
+	// The window is: [i-2]=outer approach, [i-1]=signal approach, [i],[i+1]=switch tiles, [i+2]=1 after.
+	// For flipped=false (dy>0), the junction uses mainTiles[i-2] as At(0,-2).
+	// That tile must be straight N-S too, or the junction's outer approach lands off the main line.
 	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist) {
 		local p2Set = {};
 		foreach(t in parallelTiles) p2Set.rawset(t, true);
-		local mapW = AIMap.GetMapSizeX();
+		local tried = 0;
 
-		for(local i = minDist; i <= maxDist && i < mainTiles.len() - 1; i++) {
-			local t1 = mainTiles[i];
-			local dx = AIMap.GetTileX(t1) - AIMap.GetTileX(mainTiles[i - 1]);
-			local dy = AIMap.GetTileY(t1) - AIMap.GetTileY(mainTiles[i - 1]);
-			// Only handle N-S straight sections (dx=0, dy=±1)
-			if(dx != 0 || dy == 0) continue;
+		// Need i-2, i-1, i, i+1, i+2 all valid.
+		for(local i = minDist; i <= maxDist && i + 2 < mainTiles.len(); i++) {
+			if(i < 2) continue;
+			local mm1 = mainTiles[i - 2];
+			local m0 = mainTiles[i - 1];
+			local m1 = mainTiles[i];
+			local m2 = mainTiles[i + 1];
+			local m3 = mainTiles[i + 2];
 
-			local t2 = null;
-			local neighbors = [t1 + 1, t1 - 1, t1 + mapW, t1 - mapW];
-			foreach(nb in neighbors) {
-				if(p2Set.rawin(nb)) { t2 = nb; break; }
+			// All 5 tiles must be straight N-S with identical dy.
+			local dy = AIMap.GetTileY(m1) - AIMap.GetTileY(m0);
+			if(AIMap.GetTileX(m1) != AIMap.GetTileX(m0)) continue; // not straight
+			if(dy == 0) continue;
+			if(AIMap.GetTileX(mm1) != AIMap.GetTileX(m0)) continue;
+			if(AIMap.GetTileY(mm1) - AIMap.GetTileY(m0) != -dy) continue;
+			if(AIMap.GetTileX(m2) != AIMap.GetTileX(m1)) continue;
+			if(AIMap.GetTileY(m2) - AIMap.GetTileY(m1) != dy) continue;
+			if(AIMap.GetTileX(m3) != AIMap.GetTileX(m2)) continue;
+			if(AIMap.GetTileY(m3) - AIMap.GetTileY(m2) != dy) continue;
+
+			// All 4 must have a parallel tile at the same y, at a consistent x-offset.
+			local xOff = null;
+			local parallelOk = true;
+			foreach(mt in [m0, m1, m2, m3]) {
+				local found = false;
+				foreach(xd in [-1, 1]) {
+					local candidate = AIMap.GetTileIndex(
+						AIMap.GetTileX(mt) + xd, AIMap.GetTileY(mt));
+					if(p2Set.rawin(candidate)) {
+						if(xOff == null) xOff = xd;
+						if(xd == xOff) { found = true; break; }
+					}
+				}
+				if(!found) { parallelOk = false; break; }
 			}
-			if(t2 == null) continue;
+			if(!parallelOk) continue;
 
-			// Origin = NW corner of the two parallel switch tiles
+			// All 5 main tiles and their parallel counterparts must be at the same height.
+			local levelOk = true;
+			local baseHeight = AITile.GetMinHeight(m1);
+			foreach(mt in [mm1, m0, m1, m2, m3]) {
+				if(AITile.GetMinHeight(mt) != baseHeight) {
+					levelOk = false; break;
+				}
+				local par = AIMap.GetTileIndex(AIMap.GetTileX(mt) + xOff, AIMap.GetTileY(mt));
+				if(AITile.GetMinHeight(par) != baseHeight) {
+					levelOk = false; break;
+				}
+			}
+			if(!levelOk) continue;
+
+			// Origin = NW corner of the switch tile pair (m1 and its parallel).
+			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + xOff, AIMap.GetTileY(m1));
 			local origin = AIMap.GetTileIndex(
-				min(AIMap.GetTileX(t1), AIMap.GetTileX(t2)),
-				min(AIMap.GetTileY(t1), AIMap.GetTileY(t2)));
+				min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
+				min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
 
-			// dy>0: going south away from station => station is north => flipped=false
-			// dy<0: going north away from station => station is south => flipped=true
+			// dy>0: going south => station is north => flipped=false
+			// dy<0: going north => station is south => flipped=true
 			local flipped = (dy < 0);
 			local j = FourWayJunction(origin, flipped);
+			tried++;
+			HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
+				+ " flipped=" + flipped + " dy=" + dy);
 			if(j.Build(true)) {
-				j.Build(false);
-				HgLog.Info("FourWayJunction built at " + HgTile(origin)
-					+ " flipped=" + flipped);
-				return true;
+				if(j.Build(false)) {
+					HgLog.Info("FourWayJunction built at " + HgTile(origin)
+						+ " flipped=" + flipped);
+					return true;
+				}
+				// Real build failed (signals restored, partial track removed); try next.
+			} else {
+				HgLog.Info("FourWayJunction.Try: test failed at i=" + i
+					+ " origin=" + HgTile(origin));
 			}
 		}
+		HgLog.Info("FourWayJunction.TryBuildNearStation: tried=" + tried + " none succeeded");
 		return false;
 	}
 }
