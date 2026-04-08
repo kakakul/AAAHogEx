@@ -3154,171 +3154,6 @@ class RailRemover extends Construction {
 
 Construction.nameClass.RailRemover <- RailRemover;
 
-class LeftDivergeJunction {
-	/*
-	Double-track main line (N-S) splits into a double-track SW branch.
-	originTile is the NW tile of the 2x1 switch area at y=0.
-	flipY=false: main approaches from NORTH (station is north, route goes south).
-	flipY=true:  main approaches from SOUTH (y-coordinates mirrored in At()).
-
-	Layout (flipY=false):
-	        x=-2     x=-1      x=0      x=1
-	y=-2:                    (0,-2,↓)   (1,-2,↑)   <- main track (existing)
-	y=-1:                    (0,-1,S↓)  (1,-1,↑)   <- PBS signal approach
-	y= 0:           (-1,0,↙) (0,0,↙↓↗) (1,0,↗↑)   <- (0,0)=SW curve; (1,0)=N-S straight
-	y=+1: (-2,2,↙) (-1,1,↙↗S) (0,1,↗↓) (1,1,↑S)    <- branch steps
-	y=+2:                     (0,2,↓)   (1,2,↑)    <- branch endpoints
-
-	Track 0 (SW via x=0): (0,0)->(-1,0)->(-1,1)->(-2,1)->(-2,2)
-	Track 1 (SW via x=1): (1,0)->(0,0)->(0,1)->(-1,1)->(-1,2)
-	Tiles (0,0) and (-1,1) carry two non-crossing corner pieces each (N_W + S_E).
-	Endpoints (-2,2) and (-1,2) are adjacent -- ready for a double-track connection.
-	All BuildRail calls use only Manhattan-adjacent tile triples.
-	*/
-	originTile = null;
-	flipY = null;
-
-	constructor(tile, flipY_ = false) {
-		this.originTile = tile;
-		this.flipY = flipY_;
-	}
-
-	function At(x, y) {
-		local actualY = flipY ? -y : y;
-		return AIMap.GetTileIndex(
-			AIMap.GetTileX(originTile) + x,
-			AIMap.GetTileY(originTile) + actualY);
-	}
-
-	// Returns [prev,cur,next] triples for AIRail.BuildRail.
-	// Every triple uses only adjacent (Manhattan distance=1) tiles.
-	function GetRails() {
-		return [
-			// Main approach (N-S straight, reinforce existing track)
-			[[0,-2],[0,-1],[0,0]],
-			[[1,-2],[1,-1],[1,0]],
-			// Track 0: (0,0) curves west to (-1,0)
-			[[0,-1],[0,0],[-1,0]],
-			// (-1,0) curves south to (-1,1)
-			[[0,0],[-1,0],[-1,1]],
-			// (-1,1) curves west to (-2,1)
-			[[-1,0],[-1,1],[-2,1]],
-			// (-2,1) curves south to (-2,2)
-			[[-1,1],[-2,1],[-2,2]],
-			// Track 1: (1,0) curves west to (0,0)  [N_W at (1,0); S_E added to (0,0)]
-			[[1,-1],[1,0],[0,0]],
-			// (0,0) curves south to (0,1)  [S_E at (0,0), alongside track 0's N_W]
-			[[1,0],[0,0],[0,1]],
-			// (0,1) curves west to (-1,1)
-			[[0,0],[0,1],[-1,1]],
-			// (-1,1) curves south to (-1,2)  [S_E at (-1,1), alongside track 0's N_W]
-			[[0,1],[-1,1],[-1,2]],
-		];
-	}
-
-	function GetRequiredTiles() {
-		return [
-			[0,0],[1,0],           // switch tiles (on main line)
-			[0,-1],[1,-1],         // main signal approach
-			[0,-2],[1,-2],         // main outer approach
-			[-1,0],                // track 0 branch step 1
-			[-1,1],[-2,1],         // track 0 branch steps 2-3 ((-1,1) shared with track 1)
-			[-2,2],                // track 0 branch endpoint
-			[0,1],[-1,2],          // track 1 branch unique steps and endpoint
-		];
-	}
-
-	// Collect all signals on junction tiles, remove them, return saved state.
-	// OpenTTD won't add a new track direction to a signaled tile.
-	function CollectAndRemoveSignals() {
-		local mapW = AIMap.GetMapSizeX();
-		local saved = [];
-		foreach(xy in GetRequiredTiles()) {
-			local t = At(xy[0], xy[1]);
-			if(!AIRail.IsRailTile(t)) continue;
-			local neighbors = [t + 1, t - 1, t + mapW, t - mapW];
-			foreach(nb in neighbors) {
-				if(!AIMap.IsValidTile(nb)) continue;
-				local stype = AIRail.GetSignalType(t, nb);
-				if(stype != AIRail.SIGNALTYPE_NONE) {
-					HgLog.Info("LeftDivergeJunction: removing signal at " + HgTile(t)
-						+ " facing " + HgTile(nb) + " type=" + stype);
-					saved.push([t, nb, stype]);
-					BuildUtils.RemoveSignalSafe(t, nb);
-				}
-			}
-		}
-		return saved;
-	}
-
-	// function RestoreSignals(saved) {
-	// 	foreach(sig in saved) {
-	// 		HgLog.Info("LeftDivergeJunction: restoring signal at " + HgTile(sig[0])
-	// 			+ " facing " + HgTile(sig[1]) + " type=" + sig[2]);
-	// 		BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
-	// 	}
-	// }
-
-	function Build(isTestMode = true) {
-		foreach(xy in GetRequiredTiles()) {
-			local t = At(xy[0], xy[1]);
-			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
-				HgLog.Info("LeftDivergeJunction.Build: blocked at [" + xy[0] + "," + xy[1]
-					+ "] " + HgTile(t) + (isTestMode ? " (test)" : " (real)"));
-				return false;
-			}
-		}
-
-		if(isTestMode) return true;
-
-		local branchTiles = [
-			At(-1, 0), At(-1, 1), At(-2, 1), At(-2, 2),
-			At( 0, 1), At(-1, 2)
-		];
-		local tileList = TileListUtils.GetLevelTileList(branchTiles);
-		tileList.Valuate(AITile.GetCornerHeight, AITile.CORNER_N);
-		local trackHeight = AITile.GetMinHeight(At(0, 0));
-		if(!TileListUtils.LevelAverage(tileList, AIRail.RAILTRACK_NW_SE, false, trackHeight)) {
-			HgLog.Warning("LeftDivergeJunction.Build: LevelTiles failed");
-			return false;
-		}
-
-		local savedSignals = CollectAndRemoveSignals();
-		local builtRails = [];
-
-		foreach(r in GetRails()) {
-			local a = At(r[0][0], r[0][1]);
-			local b = At(r[1][0], r[1][1]);
-			local c = At(r[2][0], r[2][1]);
-			if(RailBuilder.BuildRailSafe(a, b, c)) {
-				builtRails.push([a, b, c]);
-			} else if(AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) {
-				HgLog.Info("LeftDivergeJunction.Build: already built at ["
-					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b) + " (ok)");
-			} else {
-				HgLog.Warning("LeftDivergeJunction.Build: rail failed at ["
-					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b)
-					+ " (from " + HgTile(a) + " to " + HgTile(c) + ")"
-					+ " err=" + AIError.GetLastErrorString());
-				foreach(built in builtRails) {
-					AIRail.RemoveRail(built[0], built[1], built[2]);
-				}
-				//RestoreSignals(savedSignals);
-				return false;
-			}
-		}
-		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
-		// Track 0 southbound: enters from main north at (0,-1)
-		BuildUtils.BuildSignalSafe(At(0,0), At(0,-1), pbs);
-		// Branch northbound: enters from branch at (-1,1)
-		BuildUtils.BuildSignalSafe(At(-1,1), At(-1,0), pbs);
-		// Track 1 northbound: enters from branch at (1,1)
-		BuildUtils.BuildSignalSafe(At(1,1), At(1,2), pbs);
-		HgLog.Info("LeftDivergeJunction: signals placed at origin " + HgTile(originTile)
-			+ " flipY=" + flipY);
-		return true;
-	}
-}
 
 class RightDivergeJunction {
 	/*
@@ -3334,6 +3169,22 @@ class RightDivergeJunction {
 	y= 0:           (2,0,↙)  (1,0,↙↓↗) (0,0,↗↑)
 	y=+1: (3,1,↙)  (2,1,↙↗S) (1,1,↗↓)  (0,1,↑)
 	y=+2:                     (1,2,↓)   (0,2,↑S)
+
+	Layout (flipY=false, flipX=true) (S for signal placement and arrows for direction of travel):
+	        x=1       x=0      x=-1     x=-2
+	y=-2:  (1,-2,↑)  (0,-2,↓)
+	y=-1:  (1,-1,↑)  (0,-1,S↓)
+	y= 0:  (1,0,↖↑) (0,0,↘↓↖) (-1,0,↘)
+	y=+1:  (1,1,↑)   (0,1,↖↓) (-1,1,↘↖S) (-2,1,↘)
+	y=+2:  (1,2,↑S)  (0,2,↓)
+
+	Layout (flipY=true, flipX=false) (S for signal placement and arrows for direction of travel):
+	        x=3       x=2      x=1      x=0
+	y=-2:                     (1,-2,↑)   (0,-2,↓S)
+	y=-1: (3,-1,↖)  (2,-1,↖↘S) (1,-1,↘↑) (0,-1,↓)
+	y= 0:           (2,0,↖)   (1,0,↖↑↘) (0,0,↘↓)
+	y=+1:                     (1,1,S↑)  (0,1,↓)
+	y=+2:                     (1,2,↑)   (0,2,↓)
 	*/
 
 	originTile = null; // tile (0,0)
@@ -3354,13 +3205,40 @@ class RightDivergeJunction {
 			AIMap.GetTileY(originTile) + actualY);
 	}
 
+	function AtSignal(x, y) {
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + x,
+			AIMap.GetTileY(originTile) + y);
+	}
+
+	function BuildSignals(x, y, dx, dy, pbs) {
+		// Transform position
+		local fx = flipX ? -x+1 : x;
+		local fy = flipY ? -y : y;
+		// Transform direction
+		local fdx = flipX ? -dx : dx;
+		local fdy = flipY ? -dy : dy;
+		// Previous tile = one step opposite direction of travel
+		local px = fx + fdx;
+		local py = fy + fdy;
+		// Fix track handedness
+		if (flipX != flipY) {
+			// perpendicular vector
+			local nx = -fdy;
+			local ny =  fdx;
+			fx += nx;
+			fy += ny;
+			px += nx;
+			py += ny;
+		}
+
+		BuildUtils.BuildSignalSafe(AtSignal(fx,fy), AtSignal(px,py), pbs);
+	}
+
 	// Returns [prev,cur,next] triples for AIRail.BuildRail.
 	// Every triple uses only adjacent (Manhattan distance=1) tiles.
 	function GetRails() {
 		return [
-			// Main approach (N-S straight) Northbound on the right
-			// [[0,-2],[0,-1],[0,0]],
-			// [[1,-2],[1,-1],[1,0]],
 			// Branch merging in from the west to go northbound on mainline
 			[[0,-1],[0,0],[1,0]],
 			[[0,0],[1,0],[1,1]],
@@ -3376,13 +3254,10 @@ class RightDivergeJunction {
 
 	function GetRequiredTiles() {
 		return [
-			[0,0],[1,0],           // switch tiles (on main line)
-			[0,-1],[1,-1],         // main signal approach
-			[0,-2],[1,-2],         // main outer approach
-			[1,1],[2,2],           // track 0 branch unique steps and endpoint
-			[2,0],                 // track 1 branch step 1
-			[2,1],[3,1],           // track 1 branch steps 2-3 ((2,1) shared with track 0)
-			[3,2],                 // track 1 branch endpoint
+			[0,-2],[0,-1],[0,0],[0,1],[0,2],          
+			[1,-2],[1,-1],[1,0],[1,1],[1,2],           
+			[2,0],[2,1],[2,2],                 
+			[3,1],[3,2],                 
 		];
 	}
 
@@ -3468,17 +3343,9 @@ class RightDivergeJunction {
 
 		// Add signals to junction
 		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
-		if ((flipX && flipY) || (!flipX && !flipY)) {
-			// BuildUtils.BuildSignalSafe(At(0,2), At(0,3), pbs); // Signal on mainline heading north
-			// BuildUtils.BuildSignalSafe(At(1,-1), At(1,-2), pbs); // Signal on mainline heading south
-			// BuildUtils.BuildSignalSafe(At(2,1), At(2,2), pbs); // Signal on branch from the west merging into mainline
-		} else {
-			local pbs = AIRail.SIGNALTYPE_COMBO;
-			// BuildUtils.BuildSignalSafe(At(1,2), At(1,3), pbs); // Signal on mainline heading north
-			local pbs = AIRail.SIGNALTYPE_NORMAL;
-			BuildUtils.BuildSignalSafe(At(0,-1), At(0,-2), pbs); // Signal on mainline heading south
-			// BuildUtils.BuildSignalSafe(At(1,1), At(1,2), pbs); // Signal on branch from the west merging into mainline
-		}
+		BuildSignals(0,2, 0,1, pbs); // Signal on mainline heading north
+		BuildSignals(1,-1, 0,-1, pbs); // Signal on mainline heading south
+		BuildSignals(2,1, 0,1, pbs); // Signal on branch from the west merging into mainline
 
 		HgLog.Info("RightDivergeJunction: signals placed at origin " + HgTile(originTile)
 			+ " flipY=" + flipY + " flipX=" + flipX);
@@ -3570,7 +3437,7 @@ class FourWayJunction {
 				+ " flipY=" + flipY + " dy=" + dy);
 
 			if(!rightBuilt) {
-				local rightJ = RightDivergeJunction(origin, flipY, false);
+				local rightJ = RightDivergeJunction(origin, flipY, flipY);
 				if(rightJ.Build(true)) {
 					if(rightJ.Build(false)) {
 						HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
@@ -3584,7 +3451,7 @@ class FourWayJunction {
 			}
 
 			if(!leftBuilt) {
-				local leftJ = RightDivergeJunction(origin, flipY, true);
+				local leftJ = RightDivergeJunction(origin, flipY, !flipY);
 				if(leftJ.Build(true)) {
 					if(leftJ.Build(false)) {
 						HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
