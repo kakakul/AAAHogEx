@@ -3483,6 +3483,30 @@ class FourWayJunction {
 			}
 			if(!levelOk) continue;
 
+			// Approach tiles (mm1, m0, m4 and their parallels) must have no perpendicular
+			// branch connections — a branch there would indicate another junction overlaps.
+			local noBranchOk = true;
+			foreach(mt in [mm1, m0, m4]) {
+				local par = AIMap.GetTileIndex(
+					AIMap.GetTileX(mt) + offset * offX,
+					AIMap.GetTileY(mt) + offset * offY);
+				foreach(t in [mt, par]) {
+					if(!AIRail.IsRailTile(t)) continue;
+					// A straight N-S tile should only have RAILTRACK_NW_SE set.
+					// A straight E-W tile should only have RAILTRACK_NE_SW set.
+					// Any other track bits mean there is a branch at this approach tile.
+					local tracks = AIRail.GetRailTracks(t);
+					local expectedTrack = isNS ? AIRail.RAILTRACK_NW_SE : AIRail.RAILTRACK_NE_SW;
+					if((tracks & ~expectedTrack) != 0) {
+						HgLog.Info("FourWayJunction: branch at approach tile " + HgTile(t) + " tracks=" + tracks);
+						noBranchOk = false;
+						break;
+					}
+				}
+				if(!noBranchOk) break;
+			}
+			if(!noBranchOk) continue;
+
 			// Origin = NW corner of the switch tile pair (m1 and its parallel).
 			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offset * offX, AIMap.GetTileY(m1) + offset * offY);
 			local origin = AIMap.GetTileIndex(
