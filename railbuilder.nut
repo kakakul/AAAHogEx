@@ -3190,19 +3190,44 @@ class RightDivergeJunction {
 	originTile = null; // tile (0,0)
 	flipY = null;
 	flipX = null;
+	rotate = null;
 
-	constructor(tile, flipY_ = false, flipX_ = false) {
+	constructor(tile, flipY_ = false, flipX_ = false, rotate_ = false) {
 		this.originTile = tile;
 		this.flipY = flipY_;
 		this.flipX = flipX_;
+		this.rotate = rotate_;
+	}
+
+	function Transform(x, y) {
+		// Step 1: rotate if needed (N/S → E/W)
+		local rx = rotate ?  y : x;
+		local ry = rotate ? -x : y;
+
+		// Step 2: apply flips
+		local fx = flipX ? (-rx + 1) : rx;
+		local fy = flipY ? (-ry)     : ry;
+
+		return [fx, fy];
+	}
+
+	function TransformDir(dx, dy) {
+		// Step 1: rotate direction
+		local rdx = rotate ?  dy : dx;
+		local rdy = rotate ? -dx : dy;
+
+		// Step 2: apply flips
+		local fdx = flipX ? -rdx : rdx;
+		local fdy = flipY ? -rdy : rdy;
+
+		return [fdx, fdy];
 	}
 
 	function At(x, y) {
-		local actualY = flipY ? -y : y;
-		local actualX = flipX ? -x+1 : x;
+		local t = Transform(x, y);
 		return AIMap.GetTileIndex(
-			AIMap.GetTileX(originTile) + actualX,
-			AIMap.GetTileY(originTile) + actualY);
+			AIMap.GetTileX(originTile) + t[0],
+			AIMap.GetTileY(originTile) + t[1]);
 	}
 
 	function AtSignal(x, y) {
@@ -3213,17 +3238,18 @@ class RightDivergeJunction {
 
 	function BuildSignals(x, y, dx, dy, pbs) {
 		// Transform position
-		local fx = flipX ? -x+1 : x;
-		local fy = flipY ? -y : y;
+		local t  = Transform(x, y);
+		local fx = t[0];
+		local fy = t[1];
 		// Transform direction
-		local fdx = flipX ? -dx : dx;
-		local fdy = flipY ? -dy : dy;
+		local d  = TransformDir(dx, dy);
+		local fdx = d[0];
+		local fdy = d[1];
 		// Previous tile = one step opposite direction of travel
 		local px = fx + fdx;
 		local py = fy + fdy;
 		// Fix track handedness
 		if (flipX != flipY) {
-			// perpendicular vector
 			local nx = -fdy;
 			local ny =  fdx;
 			fx += nx;
@@ -3381,42 +3407,72 @@ class FourWayJunction {
 			local m2 = mainTiles[i + 1];
 			local m3 = mainTiles[i + 2];
 
-			// All 5 tiles must be straight N-S with identical dy.
+			// --- Try N-S ---
+			local isNS = true;
 			local dy = AIMap.GetTileY(m1) - AIMap.GetTileY(m0);
-			if(AIMap.GetTileX(m1) != AIMap.GetTileX(m0)) continue; // not straight
-			if(dy == 0) continue;
-			if(AIMap.GetTileX(mm1) != AIMap.GetTileX(m0)) continue;
-			if(AIMap.GetTileY(mm1) - AIMap.GetTileY(m0) != -dy) continue;
-			if(AIMap.GetTileX(m2) != AIMap.GetTileX(m1)) continue;
-			if(AIMap.GetTileY(m2) - AIMap.GetTileY(m1) != dy) continue;
-			if(AIMap.GetTileX(m3) != AIMap.GetTileX(m2)) continue;
-			if(AIMap.GetTileY(m3) - AIMap.GetTileY(m2) != dy) continue;
+			if(AIMap.GetTileX(m1) != AIMap.GetTileX(m0)) isNS = false;
+			if(dy == 0) isNS = false;
+			if(AIMap.GetTileX(mm1) != AIMap.GetTileX(m0)) isNS = false;
+			if(AIMap.GetTileY(mm1) - AIMap.GetTileY(m0) != -dy) isNS = false;
+			if(AIMap.GetTileX(m2) != AIMap.GetTileX(m1)) isNS = false;
+			if(AIMap.GetTileY(m2) - AIMap.GetTileY(m1) != dy) isNS = false;
+			if(AIMap.GetTileX(m3) != AIMap.GetTileX(m2)) isNS = false;
+			if(AIMap.GetTileY(m3) - AIMap.GetTileY(m2) != dy) isNS = false;
 
-			// All 4 must have a parallel tile at the same y, at a consistent x-offset.
-			local xOff = null;
+			// --- Try E-W ---
+			local isEW = true;
+			local dx = AIMap.GetTileX(m1) - AIMap.GetTileX(m0);
+			if(AIMap.GetTileY(m1) != AIMap.GetTileY(m0)) isEW = false;
+			if(dx == 0) isEW = false;
+			if(AIMap.GetTileY(mm1) != AIMap.GetTileY(m0)) isEW = false;
+			if(AIMap.GetTileX(mm1) - AIMap.GetTileX(m0) != -dx) isEW = false;
+			if(AIMap.GetTileY(m2) != AIMap.GetTileY(m1)) isEW = false;
+			if(AIMap.GetTileX(m2) - AIMap.GetTileX(m1) != dx) isEW = false;
+			if(AIMap.GetTileY(m3) != AIMap.GetTileY(m2)) isEW = false;
+			if(AIMap.GetTileX(m3) - AIMap.GetTileX(m2) != dx) isEW = false;
+
+			if(!isNS && !isEW) continue;
+
+			// Determine perpendicular offset direction
+			local offX = (dx == 0) ? 1 : 0; // N-S → shift in X
+			local offY = (dy == 0) ? 1 : 0; // E-W → shift in Y
+
+			// All 4 must have a parallel tile at consistent offset
+			local offset = null;
 			local parallelOk = true;
+
 			foreach(mt in [m0, m1, m2, m3]) {
 				local found = false;
-				foreach(xd in [-1, 1]) {
+
+				foreach(sign in [-1, 1]) {
 					local candidate = AIMap.GetTileIndex(
-						AIMap.GetTileX(mt) + xd, AIMap.GetTileY(mt));
+						AIMap.GetTileX(mt) + sign * offX,
+						AIMap.GetTileY(mt) + sign * offY
+					);
+
 					if(p2Set.rawin(candidate)) {
-						if(xOff == null) xOff = xd;
-						if(xd == xOff) { found = true; break; }
+						if(offset == null) offset = sign;
+						if(sign == offset) { found = true; break; }
 					}
 				}
 				if(!found) { parallelOk = false; break; }
 			}
 			if(!parallelOk) continue;
 
-			// All 5 main tiles and their parallel counterparts must be at the same height.
+			// All 5 main tiles and their parallel counterparts must be level
 			local levelOk = true;
 			local baseHeight = AITile.GetMinHeight(m1);
+
 			foreach(mt in [mm1, m0, m1, m2, m3]) {
 				if(AITile.GetMinHeight(mt) != baseHeight) {
 					levelOk = false; break;
 				}
-				local par = AIMap.GetTileIndex(AIMap.GetTileX(mt) + xOff, AIMap.GetTileY(mt));
+
+				local par = AIMap.GetTileIndex(
+					AIMap.GetTileX(mt) + offset * offX,
+					AIMap.GetTileY(mt) + offset * offY
+				);
+				
 				if(AITile.GetMinHeight(par) != baseHeight) {
 					levelOk = false; break;
 				}
@@ -3424,20 +3480,29 @@ class FourWayJunction {
 			if(!levelOk) continue;
 
 			// Origin = NW corner of the switch tile pair (m1 and its parallel).
-			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + xOff, AIMap.GetTileY(m1));
+			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offX, AIMap.GetTileY(m1));
 			local origin = AIMap.GetTileIndex(
 				min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
 				min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
 
-			// dy>0: going south => station is north => flipY=false
-			// dy<0: going north => station is south => flipY=true
-			local flipY = (dy < 0);
+			// dy>0: going south => station is north => rotate=false, flipY=false
+			// dy<0: going north => station is south => rotate=false, flipY=true
+			// dx>0: going west => station is east => rotate=true, flipY=false
+			// dx<0: going east => station is west => rotate=true, flipY=true
+			local rotate = (dx != 0);
+			local flipY;
+			if (!rotate) {
+				flipY = (dy < 0); // N-S case
+			} else {
+				flipY = (dx < 0); // E-W case
+			}
+
 			tried++;
 			HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
-				+ " flipY=" + flipY + " dy=" + dy);
+				+ " flipY=" + flipY + " rotate=" + rotate);
 
 			if(!rightBuilt) {
-				local rightJ = RightDivergeJunction(origin, flipY, flipY);
+				local rightJ = RightDivergeJunction(origin, flipY, flipY, rotate);
 				if(rightJ.Build(true)) {
 					if(rightJ.Build(false)) {
 						HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
@@ -3451,7 +3516,7 @@ class FourWayJunction {
 			}
 
 			if(!leftBuilt) {
-				local leftJ = RightDivergeJunction(origin, flipY, !flipY);
+				local leftJ = RightDivergeJunction(origin, flipY, !flipY, rotate);
 				if(leftJ.Build(true)) {
 					if(leftJ.Build(false)) {
 						HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
