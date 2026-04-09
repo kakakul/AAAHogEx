@@ -3200,26 +3200,23 @@ class RightDivergeJunction {
 	}
 
 	function Transform(x, y) {
-		// Step 1: rotate if needed (N/S → E/W)
-		local rx = rotate ?  y : x;
-		local ry = rotate ? -x : y;
-
-		// Step 2: apply flips
-		local fx = flipX ? (-rx + 1) : rx;
-		local fy = flipY ? (-ry)     : ry;
-
+		// For N-S: world_x = f(x_junction), world_y = f(y_junction)
+		//   across-track axis = x  →  +1 correction lives in fx
+		// For E-W (rotate): world_x = f(y_junction), world_y = f(x_junction)
+		//   across-track axis = x, but it maps to world_y  →  +1 correction moves to fy
+		local fx = rotate ? (flipY ? (-y)     : y)
+		                  : (flipX ? (-x + 1) : x);
+		local fy = rotate ? (flipX ? (-x + 1) : x)
+		                  : (flipY ? (-y)      : y);
 		return [fx, fy];
 	}
 
 	function TransformDir(dx, dy) {
-		// Step 1: rotate direction
-		local rdx = rotate ?  dy : dx;
-		local rdy = rotate ? -dx : dy;
-
-		// Step 2: apply flips
-		local fdx = flipX ? -rdx : rdx;
-		local fdy = flipY ? -rdy : rdy;
-
+		// Same axis swap as Transform, but no +1 (directions are not translated)
+		local fdx = rotate ? (flipY ? (-dy) : dy)
+		                   : (flipX ? (-dx) : dx);
+		local fdy = rotate ? (flipX ? (-dx) : dx)
+		                   : (flipY ? (-dy) : dy);
 		return [fdx, fdy];
 	}
 
@@ -3248,8 +3245,10 @@ class RightDivergeJunction {
 		// Previous tile = one step opposite direction of travel
 		local px = fx + fdx;
 		local py = fy + fdy;
-		// Fix track handedness
-		if (flipX != flipY) {
+		// Fix track handedness: correct when an odd number of reflections are active
+		// (rotate, flipX, flipY are each reflections; odd count flips chirality)
+		local reflections = (rotate ? 1 : 0) + (flipX ? 1 : 0) + (flipY ? 1 : 0);
+		if (reflections % 2 == 1) {
 			local nx = -fdy;
 			local ny =  fdx;
 			fx += nx;
@@ -3398,7 +3397,7 @@ class FourWayJunction {
 		local rightBuilt = false;
 
 		// Need i-2, i-1, i, i+1, i+2 all valid.
-		for(local i = minDist; i <= maxDist && i + 2 < mainTiles.len(); i++) {
+		for(local i = minDist; i <= maxDist && i + 3 < mainTiles.len(); i++) {
 			if(i < 2) continue;
 			if(leftBuilt && rightBuilt) break;
 			local mm1 = mainTiles[i - 2];
@@ -3406,8 +3405,9 @@ class FourWayJunction {
 			local m1 = mainTiles[i];
 			local m2 = mainTiles[i + 1];
 			local m3 = mainTiles[i + 2];
+			local m4 = mainTiles[i + 3];
 
-			// --- Try N-S ---
+			// --- Try N-S to find straight track ---
 			local isNS = true;
 			local dy = AIMap.GetTileY(m1) - AIMap.GetTileY(m0);
 			if(AIMap.GetTileX(m1) != AIMap.GetTileX(m0)) isNS = false;
@@ -3418,8 +3418,10 @@ class FourWayJunction {
 			if(AIMap.GetTileY(m2) - AIMap.GetTileY(m1) != dy) isNS = false;
 			if(AIMap.GetTileX(m3) != AIMap.GetTileX(m2)) isNS = false;
 			if(AIMap.GetTileY(m3) - AIMap.GetTileY(m2) != dy) isNS = false;
+			if(AIMap.GetTileX(m4) != AIMap.GetTileX(m3)) isNS = false;
+			if(AIMap.GetTileY(m4) - AIMap.GetTileY(m3) != dy) isNS = false;
 
-			// --- Try E-W ---
+			// --- Try E-W to find straight track ---
 			local isEW = true;
 			local dx = AIMap.GetTileX(m1) - AIMap.GetTileX(m0);
 			if(AIMap.GetTileY(m1) != AIMap.GetTileY(m0)) isEW = false;
@@ -3430,6 +3432,8 @@ class FourWayJunction {
 			if(AIMap.GetTileX(m2) - AIMap.GetTileX(m1) != dx) isEW = false;
 			if(AIMap.GetTileY(m3) != AIMap.GetTileY(m2)) isEW = false;
 			if(AIMap.GetTileX(m3) - AIMap.GetTileX(m2) != dx) isEW = false;
+			if(AIMap.GetTileY(m4) != AIMap.GetTileY(m3)) isEW = false;
+			if(AIMap.GetTileX(m4) - AIMap.GetTileX(m3) != dx) isEW = false;
 
 			if(!isNS && !isEW) continue;
 
@@ -3480,7 +3484,7 @@ class FourWayJunction {
 			if(!levelOk) continue;
 
 			// Origin = NW corner of the switch tile pair (m1 and its parallel).
-			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offX, AIMap.GetTileY(m1));
+			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offset * offX, AIMap.GetTileY(m1) + offset * offY);
 			local origin = AIMap.GetTileIndex(
 				min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
 				min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
