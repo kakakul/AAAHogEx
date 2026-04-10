@@ -309,7 +309,10 @@ class FreightNetwork {
 		local mapH = AIMap.GetMapSizeY();
 		local destTile = AIIndustry.GetLocation(FreightNetwork.destIndustry);
 
-		for(local ji = 0; ji < FreightNetwork.availableJunctions.len(); ji++) {
+		// Process the first junction per Step() call — every branch returns,
+		// so subsequent junctions are tried on the next Step() invocation.
+		local ji = 0;
+		{
 			local junc = FreightNetwork.availableJunctions[ji];
 
 			// Pick active merge tile (prefer left)
