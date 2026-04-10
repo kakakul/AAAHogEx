@@ -3389,7 +3389,7 @@ class FourWayJunction {
 	// At each valid location, attempts to build both a LeftDivergeJunction and a
 	// RightDivergeJunction. Each is tried independently; either may succeed or fail.
 	// Returns true if at least one junction was built anywhere in the range.
-	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist) {
+	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist, nearSrc = true) {
 		local p2Set = {};
 		foreach(t in parallelTiles) p2Set.rawset(t, true);
 		local tried = 0;
@@ -3524,6 +3524,8 @@ class FourWayJunction {
 			} else {
 				flipY = (dx < 0); // E-W case
 			}
+			// Near a source station the junction faces the wrong way — invert flipY.
+			if (nearSrc) flipY = !flipY;
 
 			tried++;
 			HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)

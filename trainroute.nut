@@ -3213,8 +3213,8 @@ class TrainRouteBuilder extends RouteBuilder {
 				&& route.pathSrcToDest.array_.len() > 40) {
 			local arr1 = route.pathSrcToDest.array_;
 			local arr2 = route.pathDestToSrc.array_;
-			FourWayJunction.TryBuildNearStation(arr1, arr2, 10, 30);
-			FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30);
+			FourWayJunction.TryBuildNearStation(arr1, arr2, 10, 30, false); // near dest
+			FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);  // near source
 		}
 
 		if(CargoUtils.IsPaxOrMail(cargo)) {
