@@ -3394,7 +3394,7 @@ class FourWayJunction {
 	//   (c) all 5 main+parallel tiles at the same height.
 	// At each valid location, attempts to build both a LeftDivergeJunction and a
 	// RightDivergeJunction. Each is tried independently; either may succeed or fail.
-	// Returns true if at least one junction was built anywhere in the range.
+	// Returns {leftTile, rightTile}: tile integers for each built junction branch end, or -1 if not built.
 	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist, nearSrc = true) {
 		local p2Set = {};
 		foreach(t in parallelTiles) p2Set.rawset(t, true);
