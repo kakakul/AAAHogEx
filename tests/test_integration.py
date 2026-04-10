@@ -53,3 +53,17 @@ def test_junctions_recorded():
         )
         # After junctions recorded, SearchAndConnect should run
         assert 'FreightNetwork.SearchAndConnect:' in output
+
+
+def test_source_connected():
+    """C3+C4 must find a second source and connect it to the existing junction."""
+    row = run_hognet(network_mode=1, days=365 * 5)
+    assert not row['error'], f"AI crashed:\n{row['output']}"
+    output = row['output']
+    if output:  # Windows: OpenTTD -vnull produces no stdout; log assertions run on Linux/CI only
+        assert 'FreightNetwork.SearchAndConnect: found source' in output, (
+            "Expected SearchAndConnect to find a source industry"
+        )
+        assert 'FreightNetwork.SearchAndConnect: connected' in output, (
+            "Expected a second source to be connected via the junction"
+        )
