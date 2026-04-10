@@ -3199,6 +3199,12 @@ class RightDivergeJunction {
 		this.rotate = rotate_;
 	}
 
+	function GetBranchEndTile() {
+		// The outer end of the diagonal branch is at junction-local (3,1).
+		// At() applies flipX/flipY/rotate so this is correct for all orientations.
+		return At(3, 1);
+	}
+
 	function Transform(x, y) {
 		// For N-S: world_x = f(x_junction), world_y = f(y_junction)
 		//   across-track axis = x  →  +1 correction lives in fx
@@ -3393,13 +3399,13 @@ class FourWayJunction {
 		local p2Set = {};
 		foreach(t in parallelTiles) p2Set.rawset(t, true);
 		local tried = 0;
-		local leftBuilt = false;
-		local rightBuilt = false;
+		local leftTile = -1;
+		local rightTile = -1;
 
 		// Need i-2, i-1, i, i+1, i+2 all valid.
 		for(local i = minDist; i <= maxDist && i + 3 < mainTiles.len(); i++) {
 			if(i < 2) continue;
-			if(leftBuilt && rightBuilt) break;
+			if(leftTile != -1 && rightTile != -1) break;
 			local mm1 = mainTiles[i - 2];
 			local m0 = mainTiles[i - 1];
 			local m1 = mainTiles[i];
@@ -3531,13 +3537,13 @@ class FourWayJunction {
 			HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
 				+ " flipY=" + flipY + " rotate=" + rotate);
 
-			if(!rightBuilt) {
+			if(rightTile == -1) {
 				local rightJ = RightDivergeJunction(origin, flipY, flipY, rotate);
 				if(rightJ.Build(true)) {
 					if(rightJ.Build(false)) {
 						HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
 							+ " flipY=" + flipY);
-						rightBuilt = true;
+						rightTile = rightJ.GetBranchEndTile();
 					}
 				} else {
 					HgLog.Info("FourWayJunction.Try: right test failed at i=" + i
@@ -3545,13 +3551,13 @@ class FourWayJunction {
 				}
 			}
 
-			if(!leftBuilt) {
+			if(leftTile == -1) {
 				local leftJ = RightDivergeJunction(origin, flipY, !flipY, rotate);
 				if(leftJ.Build(true)) {
 					if(leftJ.Build(false)) {
 						HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
 							+ " flipY=" + flipY);
-						leftBuilt = true;
+						leftTile = leftJ.GetBranchEndTile();
 					}
 				} else {
 					HgLog.Info("FourWayJunction.Try: left test failed at i=" + i
@@ -3560,7 +3566,7 @@ class FourWayJunction {
 			}
 		}
 		HgLog.Info("FourWayJunction.TryBuildNearStation: tried=" + tried
-			+ " left=" + leftBuilt + " right=" + rightBuilt);
-		return leftBuilt || rightBuilt;
+			+ " leftTile=" + leftTile + " rightTile=" + rightTile);
+		return {leftTile = leftTile, rightTile = rightTile};
 	}
 }

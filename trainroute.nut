@@ -3209,6 +3209,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		// For long double-tracked freight routes, add a Y-junction
 		// near to each station to enable future network connections.
 		if(!useSingle && !CargoUtils.IsPaxOrMail(cargo)
+				&& !HogeAI.Get().IsNetworkMode()
 				&& route.pathDestToSrc != null
 				&& route.pathSrcToDest.array_.len() > 40) {
 			local arr1 = route.pathSrcToDest.array_;
