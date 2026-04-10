@@ -1225,6 +1225,11 @@ class HogeAI extends AIController {
 		local servedStationIds = (IsNetworkMode() && paxCargo4Conn != false && paxCargo4Conn != null) ? GetPassengerServedStationIds(paxCargo4Conn) : null;
 		while(routeCandidates.Count() >= 1){
 			local t = routeCandidates.Pop();
+			// In network mode, freight is handled exclusively by FreightNetwork.Step()
+			if(IsNetworkMode() && t.rawin("cargo") && !CargoUtils.IsPaxOrMail(t.cargo)
+					&& t.vehicleType == AIVehicle.VT_RAIL) {
+				continue;
+			}
 			if(builtAirOfInfrastructureMaintenance && t.vehicleType == AIVehicle.VT_AIR) {
 				HgLog.Warning("Need to estimate again for bulding two airports with InfrastructureMaintenance");
 				return;
