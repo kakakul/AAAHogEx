@@ -4393,9 +4393,13 @@ class HogeAI extends AIController {
 		remainOps = AIController.GetOpsTillSuspend();
 
 		TrainRoute.SaveStatics(table);
-		FreightNetwork.SaveStatics(table);
 
 		HgLog.Info("TrainRoute.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
+		remainOps = AIController.GetOpsTillSuspend();
+
+		FreightNetwork.SaveStatics(table);
+
+		HgLog.Info("FreightNetwork.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
 		remainOps = AIController.GetOpsTillSuspend();
 
 		CommonRoute.SaveStatics(table);
