@@ -87,9 +87,143 @@ class FreightNetwork {
 		FreightNetwork.lastBuiltRoute = null;
 	}
 
+	function FreightNetwork::GetMapEdgeDist(tile, isNS) {
+		// Minimum distance from tile to either of the two relevant map edges.
+		// isNS=true: top/bottom edges (Y axis). isNS=false: left/right (X axis).
+		local mapW = AIMap.GetMapSizeX();
+		local mapH = AIMap.GetMapSizeY();
+		if(isNS) {
+			local y = AIMap.GetTileY(tile);
+			return min(y, mapH - 1 - y);
+		} else {
+			local x = AIMap.GetTileX(tile);
+			return min(x, mapW - 1 - x);
+		}
+	}
+
 	function FreightNetwork::FindSpine() {
-		HgLog.Info("FreightNetwork.FindSpine: stub");
-		// Implemented in Task 4
+		local ai = HogeAI.Get();
+		local mapW = AIMap.GetMapSizeX();
+		local mapH = AIMap.GetMapSizeY();
+		local mapLongSide = max(mapW, mapH);
+		local isNS = (mapH >= mapW);
+		local twentyPct = (mapLongSide * 20) / 100;
+		local coastBand = (mapLongSide * 25) / 100;
+		local maxRouteDist = (mapLongSide * 20) / 100;
+
+		HgLog.Info("FreightNetwork.FindSpine: isNS=" + isNS
+			+ " twentyPct=" + twentyPct + " maxRouteDist=" + maxRouteDist);
+
+		// Collect candidate (src, dest, cargo) pairs using existing machinery.
+		// GetMaxCargoPlaces() returns [{place, cargo, production, maxValue}, ...]
+		local cargoPlaces = ai.GetMaxCargoPlaces();
+
+		local candidates = [];
+		foreach(srcInfo in cargoPlaces) {
+			if(CargoUtils.IsPaxOrMail(srcInfo.cargo)) continue;
+			if(!(srcInfo.place instanceof HgIndustry)) continue;
+			local srcLoc = srcInfo.place.GetLocation();
+			local srcIndustry = srcInfo.place.industry;
+			if(!AIIndustry.IsValidIndustry(srcIndustry)) continue;
+			if(FreightNetwork.servedSources.rawin(srcIndustry)) continue;
+
+			// CreateRouteCandidates yields {place, estimate, score, distance, production, ...}
+			foreach(destInfo in ai.CreateRouteCandidates(
+					srcInfo.cargo, srcInfo.place,
+					{searchProducing = false}, 0, 4, {})) {
+				if(destInfo.estimate == null) continue;
+				if(!(destInfo.place instanceof HgIndustry)) continue;
+				local destLoc = destInfo.place.GetLocation();
+				local destIndustry = destInfo.place.industry;
+				if(!AIIndustry.IsValidIndustry(destIndustry)) continue;
+				if(FreightNetwork.servedDests.rawin(destIndustry)) continue;
+
+				// Dest must be near a coast
+				local destEdgeDist = FreightNetwork.GetMapEdgeDist(destLoc, isNS);
+				if(destEdgeDist > coastBand) continue;
+
+				// Route length filter
+				local dist = AIMap.DistanceManhattan(srcLoc, destLoc);
+				if(dist > maxRouteDist || dist == 0) continue;
+
+				local srcEdgeDist = FreightNetwork.GetMapEdgeDist(srcLoc, isNS);
+				// Score: high = src far from edge (capped at 20%), dest close to edge
+				local score = (min(srcEdgeDist, twentyPct) * 1000) / (destEdgeDist + 1);
+				candidates.push({
+					srcPlace = srcInfo.place,
+					destPlace = destInfo.place,
+					srcIndustry = srcIndustry,
+					destIndustry = destIndustry,
+					cargo = srcInfo.cargo,
+					estimate = destInfo.estimate,
+					score = score,
+					value = destInfo.estimate.value
+				});
+			}
+		}
+
+		if(candidates.len() == 0) {
+			HgLog.Info("FreightNetwork.FindSpine: no candidates found");
+			return;
+		}
+
+		// Sort by value descending for percentile filter
+		candidates.sort(function(a, b) { return b.value - a.value; });
+
+		// Widen percentile from 10% until a candidate is selected
+		local selected = null;
+		for(local pct = 10; pct <= 100 && selected == null; pct += 10) {
+			local threshold = max(1, candidates.len() * pct / 100);
+			for(local i = 0; i < threshold && selected == null; i++) {
+				selected = candidates[i];
+			}
+		}
+
+		if(selected == null) {
+			HgLog.Info("FreightNetwork.FindSpine: no candidate survived filters");
+			return;
+		}
+
+		HgLog.Info("FreightNetwork.FindSpine: selected src="
+			+ AIIndustry.GetName(selected.srcIndustry)
+			+ " dest=" + AIIndustry.GetName(selected.destIndustry)
+			+ " score=" + selected.score + " value=" + selected.value);
+
+		// Build route using the existing machinery
+		local dist = AIMap.DistanceManhattan(
+			selected.srcPlace.GetLocation(), selected.destPlace.GetLocation());
+		local t = {
+			src = selected.srcPlace,
+			dest = selected.destPlace,
+			cargo = selected.cargo,
+			vehicleType = AIVehicle.VT_RAIL,
+			estimate = selected.estimate,
+			score = selected.score,
+			isBiDirectional = false,
+			explain = selected.estimate.value + " RAIL "
+				+ selected.destPlace + "<=" + selected.srcPlace
+				+ "[" + selected.cargo + "] dist:" + dist
+		};
+		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
+		if(builder == null) {
+			HgLog.Warning("FreightNetwork.FindSpine: CreateBuilder returned null");
+			return;
+		}
+		local newRoutes = builder.Build();
+		if(newRoutes == null) newRoutes = [];
+		if(typeof newRoutes != "array") newRoutes = [newRoutes];
+		if(newRoutes.len() == 0) {
+			HgLog.Warning("FreightNetwork.FindSpine: Build failed");
+			return;
+		}
+
+		FreightNetwork.destIndustry = selected.destIndustry;
+		FreightNetwork.destPlace = selected.destPlace;
+		FreightNetwork.servedDests.rawset(selected.destIndustry, true);
+		FreightNetwork.servedSources.rawset(selected.srcIndustry, true);
+		FreightNetwork.lastBuiltRoute = newRoutes[0];
+		FreightNetwork.phase = FreightNetwork.PHASE_BUILD_JUNCTION;
+		HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to PHASE_BUILD_JUNCTION");
 	}
 
 	function FreightNetwork::BuildJunctions() {
