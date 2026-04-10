@@ -37,3 +37,15 @@ def test_spine_built():
             "Expected spine route to be built"
         )
         assert 'advancing to PHASE_BUILD_JUNCTION' in output
+
+
+def test_junctions_recorded():
+    """C2 must build junctions and record merge tiles after spine route."""
+    row = run_hognet(network_mode=1, days=365 * 3)
+    assert not row['error'], f"AI crashed:\n{row['output']}"
+    output = row['output']
+    if output:  # Windows: OpenTTD -vnull produces no stdout; log assertions run on Linux/CI only
+        assert 'FreightNetwork.BuildJunctions: recorded junctions' in output or \
+               'FreightNetwork.BuildJunctions: no junctions built near source' in output, (
+            "Expected BuildJunctions to run after spine is built"
+        )

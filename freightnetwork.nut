@@ -232,8 +232,49 @@ class FreightNetwork {
 	}
 
 	function FreightNetwork::BuildJunctions() {
-		HgLog.Info("FreightNetwork.BuildJunctions: stub");
-		// Implemented in Task 5
+		local route = FreightNetwork.lastBuiltRoute;
+		if(route == null) {
+			HgLog.Warning("FreightNetwork.BuildJunctions: lastBuiltRoute is null, skipping");
+			FreightNetwork.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
+			return;
+		}
+
+		// pathDestToSrc starts at destination; pathSrcToDest starts at source.
+		// Pass dest-to-src as mainTiles so the scan starts near the source station.
+		local arr1 = route.pathSrcToDest.array_;
+		local arr2 = (route.pathDestToSrc != null) ? route.pathDestToSrc.array_ : null;
+		if(arr2 == null) {
+			HgLog.Warning("FreightNetwork.BuildJunctions: pathDestToSrc is null, skipping junction build");
+			FreightNetwork.lastBuiltRoute = null;
+			FreightNetwork.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
+			return;
+		}
+		local result = FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);
+
+		local srcLoc = (route.srcHgStation != null && route.srcHgStation.place != null)
+			? route.srcHgStation.place.GetLocation()
+			: -1;
+		local srcIndustry = (srcLoc != -1)
+			? (route.srcHgStation.place instanceof HgIndustry ? route.srcHgStation.place.industry : -1)
+			: -1;
+
+		if(result.leftTile != -1 || result.rightTile != -1) {
+			FreightNetwork.availableJunctions.push({
+				leftTile = result.leftTile,
+				rightTile = result.rightTile,
+				srcIndustry = srcIndustry,
+				primaryRadius = 0,
+				perpOutRadius = 0,
+				perpInRadius = 0
+			});
+			HgLog.Info("FreightNetwork.BuildJunctions: recorded junctions leftTile="
+				+ result.leftTile + " rightTile=" + result.rightTile
+				+ " srcIndustry=" + srcIndustry);
+		} else {
+			HgLog.Warning("FreightNetwork.BuildJunctions: no junctions built near source");
+		}
+
+		FreightNetwork.lastBuiltRoute = null;
 		FreightNetwork.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
 	}
 
