@@ -9,6 +9,7 @@ require("estimator.nut");
 require("route.nut");
 require("trainroute.nut");
 require("railbuilder.nut");
+require("freightnetwork.nut");
 require("road.nut");
 require("water.nut");
 require("air.nut");
@@ -749,7 +750,7 @@ class HogeAI extends AIController {
 			prevLoadAmount = currentLoanAmount;
 			currentLoanAmount = AICompany.GetLoanAmount();
 			ResetEstimateTable();
-			while(indexPointer < (IsNetworkMode() ? 5 : 4)) {
+			while(indexPointer < (IsNetworkMode() ? 6 : 4)) {
 				UpdateSettings();
 				limitDate = AIDate.GetCurrentDate() + 600;
 				Place.canBuildAirportCache.clear();
@@ -851,6 +852,9 @@ class HogeAI extends AIController {
 				break;
 			case 4:
 				if(IsNetworkMode()) ConnectUnservedTowns();
+				break;
+			case 5:
+				if(IsNetworkMode()) FreightNetwork.Step();
 				break;
 		}
 	}
@@ -4389,6 +4393,7 @@ class HogeAI extends AIController {
 		remainOps = AIController.GetOpsTillSuspend();
 
 		TrainRoute.SaveStatics(table);
+		FreightNetwork.SaveStatics(table);
 
 		HgLog.Info("TrainRoute.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
 		remainOps = AIController.GetOpsTillSuspend();
@@ -4476,7 +4481,8 @@ class HogeAI extends AIController {
 		Place.LoadStatics(loadData);
 		HgStation.LoadStatics(loadData);
 		TrainInfoDictionary.LoadStatics(loadData);
-		TrainRoute.LoadStatics(loadData);		
+		TrainRoute.LoadStatics(loadData);
+		FreightNetwork.LoadStatics(loadData);
 		CommonRoute.LoadStatics(loadData);
 		RoadRoute.LoadStatics(loadData);
 		WaterRoute.LoadStatics(loadData);
