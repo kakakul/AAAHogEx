@@ -170,12 +170,17 @@ class FreightNetwork {
 		// Sort by value descending for percentile filter
 		candidates.sort(function(a, b) { return b.value - a.value; });
 
-		// Widen percentile from 10% until a candidate is selected
+		// Widen percentile from 10% until a candidate is selected.
+		// Within each band, pick the highest score (most interior src / most coastal dest).
 		local selected = null;
 		for(local pct = 10; pct <= 100 && selected == null; pct += 10) {
 			local threshold = max(1, candidates.len() * pct / 100);
-			for(local i = 0; i < threshold && selected == null; i++) {
-				selected = candidates[i];
+			local bestScore = -1;
+			for(local i = 0; i < threshold; i++) {
+				if(candidates[i].score > bestScore) {
+					bestScore = candidates[i].score;
+					selected = candidates[i];
+				}
 			}
 		}
 
