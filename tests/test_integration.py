@@ -45,7 +45,11 @@ def test_junctions_recorded():
     assert not row['error'], f"AI crashed:\n{row['output']}"
     output = row['output']
     if output:  # Windows: OpenTTD -vnull produces no stdout; log assertions run on Linux/CI only
-        assert 'FreightNetwork.BuildJunctions: recorded junctions' in output or \
-               'FreightNetwork.BuildJunctions: no junctions built near source' in output, (
+        assert 'FreightNetwork.BuildJunctions:' in output, (
             "Expected BuildJunctions to run after spine is built"
         )
+        assert 'FreightNetwork.BuildJunctions: recorded junctions' in output, (
+            "Expected junction merge tiles to be recorded (TryBuildNearStation found no location?)"
+        )
+        # After junctions recorded, SearchAndConnect should run
+        assert 'FreightNetwork.SearchAndConnect:' in output

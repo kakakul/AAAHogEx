@@ -241,6 +241,8 @@ class FreightNetwork {
 
 		// pathDestToSrc starts at destination; pathSrcToDest starts at source.
 		// Pass dest-to-src as mainTiles so the scan starts near the source station.
+		// pathSrcToDest is always populated by Build() — null would indicate a broken route
+		// that was never used to create trains, so this is safe to access directly.
 		local arr1 = route.pathSrcToDest.array_;
 		local arr2 = (route.pathDestToSrc != null) ? route.pathDestToSrc.array_ : null;
 		if(arr2 == null) {
@@ -254,6 +256,8 @@ class FreightNetwork {
 		local srcLoc = (route.srcHgStation != null && route.srcHgStation.place != null)
 			? route.srcHgStation.place.GetLocation()
 			: -1;
+		// Use .industry directly — AIIndustry.GetIndustryID(tile) only matches the exact tile,
+		// missing most of the industry footprint.
 		local srcIndustry = (srcLoc != -1)
 			? (route.srcHgStation.place instanceof HgIndustry ? route.srcHgStation.place.industry : -1)
 			: -1;
