@@ -6,15 +6,15 @@ OPENTTD_VERSION = '15.3'
 SEED = 42
 
 
-def run_hognet(network_mode=0, days=365 * 3, extra_params=()):
+def run_hognet(network_mode=0, days=365 * 3, extra_params=(), seed=SEED):
     """Run HogNet headlessly and return the result row."""
     params = (('network_mode', str(network_mode)),
-              ('usable_cargos', '2'),        # freight only — speeds up freight route building
+              ('usable_cargos', '2'),
               ('IsForceToHandleFright', '1')) + extra_params
     results = list(run_experiments(
         openttd_version=OPENTTD_VERSION,
         experiments=({
-            'seed': SEED,
+            'seed': seed,
             'ais': (local_folder(AI_FOLDER, 'HogNet', ai_params=params),),
             'days': days,
         },),
