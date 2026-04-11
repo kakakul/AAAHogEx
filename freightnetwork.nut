@@ -317,9 +317,20 @@ class FreightNetwork {
 		local destTile = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
 		local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
 
+		local allIndustries = AIIndustryList();
+
+		local mapLongSide = max(mapW, mapH);
+		local maxRounds = mapLongSide / 10 + 1;
+		local rounds = 0;
+
 		// Outer loop: keep expanding all junctions in rounds until a source is found
 		// or all junctions are removed (primary extent exceeds map boundary).
 		while(FreightNetwork.availableJunctions.len() > 0) {
+			rounds++;
+			if(rounds > maxRounds) {
+				HgLog.Info("FreightNetwork.SearchAndConnect: round limit reached, giving up");
+				return false;
+			}
 			local ji = 0;
 			local anyActive = false;
 			while(ji < FreightNetwork.availableJunctions.len()) {
@@ -382,7 +393,7 @@ class FreightNetwork {
 
 				// Scan for matching source in bounding box
 				local found = null;
-				foreach(indId, _ in AIIndustryList()) {
+				foreach(indId, _ in allIndustries) {
 					if(FreightNetwork.servedSources.rawin(indId)) continue;
 					local indLoc = AIIndustry.GetLocation(indId);
 					local ix = AIMap.GetTileX(indLoc);
@@ -409,7 +420,7 @@ class FreightNetwork {
 					if(srcPlace == null) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: Place.Get failed");
 						FreightNetwork.availableJunctions.remove(ji);
-						return false;
+						continue;
 					}
 					local dist = AIMap.DistanceManhattan(found.tile,
 						AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
@@ -420,7 +431,7 @@ class FreightNetwork {
 					if(estimate == null) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: estimate null");
 						FreightNetwork.availableJunctions.remove(ji);
-						return false;
+						continue;
 					}
 					local t = {
 						src          = srcPlace,
@@ -439,7 +450,7 @@ class FreightNetwork {
 					if(builder == null) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: CreateBuilder null");
 						FreightNetwork.availableJunctions.remove(ji);
-						return false;
+						continue;
 					}
 					local newRoutes = builder.Build();
 					if(newRoutes == null) newRoutes = [];
@@ -447,7 +458,7 @@ class FreightNetwork {
 					if(newRoutes.len() == 0) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: Build failed");
 						FreightNetwork.availableJunctions.remove(ji);
-						return false;
+						continue;
 					}
 					FreightNetwork.servedSources.rawset(found.industry, true);
 					FreightNetwork.availableJunctions.remove(ji);
