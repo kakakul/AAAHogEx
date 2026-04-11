@@ -1484,15 +1484,16 @@ class HogeAI extends AIController {
 			}
 		}
 		
-		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, { 
+		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, {
 			pendingToDoPostBuild = false //roiBase ? true : false
 			destRoute = destRoute!=null ? destRoute.id : null
 			sourceRoute = sourceRoute!=null ? sourceRoute.id : null
 			setRouteCandidates = true
-			canChangeDest = t.rawin("canChangeDest") ? t.canChangeDest : 
+			canChangeDest = t.rawin("canChangeDest") ? t.canChangeDest :
 				destRoute==null && t.estimate.destRouteCargoIncome == 0 && t.estimate.additionalRouteIncome == 0
 			estimate = t.estimate
 			limitDate = limitDate
+			notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
 		});
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);

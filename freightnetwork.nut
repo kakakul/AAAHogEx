@@ -119,19 +119,16 @@ class FreightNetwork {
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
 		local mapLongSide = max(mapW, mapH);
-		local isNS = (mapH >= mapW);
-		local twentyPct = (mapLongSide * 20) / 100;
-		local coastBand = (mapLongSide * 25) / 100;
 		local maxRouteDist = (mapLongSide * 20) / 100;
 
-		HgLog.Info("FreightNetwork.FindSpine: isNS=" + isNS
-			+ " twentyPct=" + twentyPct + " maxRouteDist=" + maxRouteDist);
+		HgLog.Info("FreightNetwork.FindSpine: mapLongSide=" + mapLongSide
+			+ " maxRouteDist=" + maxRouteDist);
 
-		// Collect candidate (src, dest, cargo) pairs using existing machinery.
-		// GetMaxCargoPlaces() returns [{place, cargo, production, maxValue}, ...]
+		// Step 1: Collect all candidate pairs sorted by profitability.
+		// No distance or coastal pre-filtering — profitability rank drives selection.
 		local cargoPlaces = ai.GetMaxCargoPlaces();
+		local allCandidates = [];
 
-		local candidates = [];
 		foreach(srcInfo in cargoPlaces) {
 			if(CargoUtils.IsPaxOrMail(srcInfo.cargo)) continue;
 			if(!(srcInfo.place instanceof HgIndustry)) continue;
@@ -140,7 +137,6 @@ class FreightNetwork {
 			if(!AIIndustry.IsValidIndustry(srcIndustry)) continue;
 			if(FreightNetwork.servedSources.rawin(srcIndustry)) continue;
 
-			// CreateRouteCandidates yields {place, estimate, score, distance, production, ...}
 			foreach(destInfo in ai.CreateRouteCandidates(
 					srcInfo.cargo, srcInfo.place,
 					{searchProducing = false}, 0, 4, {})) {
@@ -151,48 +147,75 @@ class FreightNetwork {
 				if(!AIIndustry.IsValidIndustry(destIndustry)) continue;
 				if(FreightNetwork.servedDests.rawin(destIndustry)) continue;
 
-				// Dest must be near a coast
-				local destEdgeDist = FreightNetwork.GetMapEdgeDist(destLoc, isNS);
-				if(destEdgeDist > coastBand) continue;
-
-				// Route length filter
-				local dist = AIMap.DistanceManhattan(srcLoc, destLoc);
-				if(dist > maxRouteDist || dist == 0) continue;
-
-				local srcEdgeDist = FreightNetwork.GetMapEdgeDist(srcLoc, isNS);
-				// Score: high = src far from edge (capped at 20%), dest close to edge
-				local score = (min(srcEdgeDist, twentyPct) * 1000) / (destEdgeDist + 1);
-				candidates.push({
+				allCandidates.push({
 					srcPlace = srcInfo.place,
 					destPlace = destInfo.place,
 					srcIndustry = srcIndustry,
 					destIndustry = destIndustry,
 					cargo = srcInfo.cargo,
 					estimate = destInfo.estimate,
-					score = score,
-					value = destInfo.estimate.value
+					value = destInfo.estimate.value,
+					srcLoc = srcLoc,
+					destLoc = destLoc
 				});
 			}
 		}
 
-		if(candidates.len() == 0) {
+		if(allCandidates.len() == 0) {
 			HgLog.Info("FreightNetwork.FindSpine: no candidates found");
 			return;
 		}
 
-		// Sort by value descending for percentile filter
-		candidates.sort(function(a, b) { return b.value - a.value; });
+		allCandidates.sort(function(a, b) { return b.value - a.value; });
 
-		// Widen percentile from 10% until a candidate is selected.
-		// Within each band, pick the highest score (most interior src / most coastal dest).
+		// Step 2: Widen top-N% band until a candidate survives all filters.
+		// Within each band pick highest score = value * 1000 / (destMinEdgeDist + 1).
 		local selected = null;
 		for(local pct = 10; pct <= 100 && selected == null; pct += 10) {
-			local threshold = max(1, candidates.len() * pct / 100);
+			local threshold = max(1, allCandidates.len() * pct / 100);
 			local bestScore = -1;
+
 			for(local i = 0; i < threshold; i++) {
-				if(candidates[i].score > bestScore) {
-					bestScore = candidates[i].score;
-					selected = candidates[i];
+				local c = allCandidates[i];
+
+				// Filter: route length < 20% of map long side
+				local dist = AIMap.DistanceManhattan(c.srcLoc, c.destLoc);
+				if(dist > maxRouteDist || dist == 0) continue;
+
+				// Filter: dest must be within 20% of map long side from the nearest edge
+				local destX = AIMap.GetTileX(c.destLoc);
+				local destY = AIMap.GetTileY(c.destLoc);
+				local dN = destY;
+				local dS = mapH - 1 - destY;
+				local dW = destX;
+				local dE = mapW - 1 - destX;
+				local minEdgeDist = min(min(dN, dS), min(dW, dE));
+				if(minEdgeDist > maxRouteDist) continue;
+
+				// Filter: src must be guaranteed inland — the route vector (dest→src)
+				// must point away from the dest's nearest edge at < 45 degrees.
+				// GetPrimaryDirection returns the dominant unit axis; check sign points inland.
+
+				local pDir = FreightNetwork.GetPrimaryDirection(c.destLoc, c.srcLoc);
+				local inlandOk = false;
+				if(minEdgeDist == dN) {
+					inlandOk = (pDir.dy == 1);   // src south of dest: inland from north edge
+				} else if(minEdgeDist == dS) {
+					inlandOk = (pDir.dy == -1);  // src north of dest: inland from south edge
+				} else if(minEdgeDist == dW) {
+					inlandOk = (pDir.dx == 1);   // src east of dest: inland from west edge
+				} else {
+					inlandOk = (pDir.dx == -1);  // src west of dest: inland from east edge
+				}
+				if(!inlandOk) continue;
+
+				// Score = estProfit * 1 / (destMinEdgeDist + 1)
+				local score = (c.value * 1000) / (minEdgeDist + 1);
+				if(score > bestScore) {
+					bestScore = score;
+					c.score <- score;
+					c.minEdgeDist <- minEdgeDist;
+					selected = c;
 				}
 			}
 		}
@@ -218,6 +241,7 @@ class FreightNetwork {
 			estimate = selected.estimate,
 			score = selected.score,
 			isBiDirectional = false,
+			notUseSingle = true,
 			explain = selected.estimate.value + " RAIL "
 				+ selected.destPlace + "<=" + selected.srcPlace
 				+ "[" + selected.cargo + "] dist:" + dist
@@ -388,16 +412,14 @@ class FreightNetwork {
 				if(ix < minX || ix > maxX || iy < minY || iy > maxY) continue;
 
 				// Check this industry produces cargo accepted by destIndustry
+				local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
+				local srcType = AIIndustry.GetIndustryType(indId);
 				local matchCargo = -1;
-				for(local ci = 0; ci < 3 && matchCargo == -1; ci++) {
-					local dc = AIIndustry.GetAcceptedCargo(FreightNetwork.state.destIndustry, ci);
-					if(dc == -1) continue;
-					for(local pi = 0; pi < 2; pi++) {
-						if(AIIndustry.GetProducedCargo(indId, pi) == dc) {
-							matchCargo = dc;
-							break;
-						}
+				foreach(dc, _ in AIIndustryType.GetAcceptedCargo(destType)) {
+					foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
+						if(pc == dc) { matchCargo = dc; break; }
 					}
+					if(matchCargo != -1) break;
 				}
 				if(matchCargo == -1) continue;
 				found = {industry = indId, tile = indLoc, cargo = matchCargo};
