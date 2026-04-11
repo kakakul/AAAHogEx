@@ -25,6 +25,7 @@ class FreightNetwork {
 }
 
 	function FreightNetwork::Step() {
+		if(HogeAI.Get().IsPaxMailOnly()) return;
 		switch(FreightNetwork.state.phase) {
 			case FreightNetwork.PHASE_FIND_SPINE:
 				FreightNetwork.FindSpine();
