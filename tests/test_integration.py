@@ -32,11 +32,11 @@ def test_spine_built():
     row = run_hognet(network_mode=1, days=365 * 3)
     assert not row['error'], f"AI crashed:\n{row['output']}"
     output = row['output']
-    if output:  # Windows: OpenTTD -vnull produces no stdout; log assertions run on Linux/CI only
+    if output:
         assert 'FreightNetwork.FindSpine: spine built' in output, (
             "Expected spine route to be built"
         )
-        assert 'advancing to PHASE_BUILD_JUNCTION' in output
+        assert 'advancing to BuildJunctions' in output
 
 
 def test_junctions_recorded():

@@ -2,14 +2,9 @@
 // Strategy C freight network builder. Network mode only.
 
 class FreightNetwork {
-	static PHASE_FIND_SPINE = 0;
-	static PHASE_BUILD_JUNCTION = 1;
-	static PHASE_SEARCH_AND_CONNECT = 2;
-
 	// Mutable scalar state in a table — Squirrel static slots cannot be reassigned with =
 	// so scalars (integers, null) live here and are updated via table-slot assignment.
 	static state = {
-		phase = 0,
 		destIndustry = null,
 		destPlace = null,
 		networkId = 0,
@@ -26,16 +21,20 @@ class FreightNetwork {
 
 	function FreightNetwork::Step() {
 		if(HogeAI.Get().IsPaxMailOnly()) return;
-		switch(FreightNetwork.state.phase) {
-			case FreightNetwork.PHASE_FIND_SPINE:
-				FreightNetwork.FindSpine();
-				break;
-			case FreightNetwork.PHASE_BUILD_JUNCTION:
+		if(FreightNetwork.state.destIndustry == null) {
+			local built = FreightNetwork.FindSpine();
+			if(built) FreightNetwork.BuildJunctions();
+		} else {
+			local connected = FreightNetwork.SearchAndConnect();
+			if(connected) {
 				FreightNetwork.BuildJunctions();
-				break;
-			case FreightNetwork.PHASE_SEARCH_AND_CONNECT:
-				FreightNetwork.SearchAndConnect();
-				break;
+			} else if(FreightNetwork.availableJunctions.len() == 0) {
+				HgLog.Info("FreightNetwork: network exhausted, starting network id="
+					+ (FreightNetwork.state.networkId + 1));
+				FreightNetwork.state.destIndustry = null;
+				FreightNetwork.state.destPlace = null;
+				FreightNetwork.state.networkId++;
+			}
 		}
 	}
 
@@ -52,7 +51,6 @@ class FreightNetwork {
 			});
 		}
 		table.freightNetwork <- {
-			phase = FreightNetwork.state.phase,
 			destIndustry = FreightNetwork.state.destIndustry,
 			availableJunctions = junctions,
 			networkId = FreightNetwork.state.networkId,
@@ -64,7 +62,6 @@ class FreightNetwork {
 	function FreightNetwork::LoadStatics(data) {
 		if(!data.rawin("freightNetwork")) return;
 		local fn = data.freightNetwork;
-		FreightNetwork.state.phase = fn.phase;
 		FreightNetwork.state.destIndustry = fn.destIndustry;
 		FreightNetwork.state.networkId = fn.networkId;
 		FreightNetwork.servedSources.clear();
@@ -164,7 +161,7 @@ class FreightNetwork {
 
 		if(allCandidates.len() == 0) {
 			HgLog.Info("FreightNetwork.FindSpine: no candidates found");
-			return;
+			return false;
 		}
 
 		allCandidates.sort(function(a, b) { return b.value - a.value; });
@@ -223,7 +220,7 @@ class FreightNetwork {
 
 		if(selected == null) {
 			HgLog.Info("FreightNetwork.FindSpine: no candidate survived filters");
-			return;
+			return false;
 		}
 
 		HgLog.Info("FreightNetwork.FindSpine: selected src="
@@ -250,14 +247,14 @@ class FreightNetwork {
 		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
 		if(builder == null) {
 			HgLog.Warning("FreightNetwork.FindSpine: CreateBuilder returned null");
-			return;
+			return false;
 		}
 		local newRoutes = builder.Build();
 		if(newRoutes == null) newRoutes = [];
 		if(typeof newRoutes != "array") newRoutes = [newRoutes];
 		if(newRoutes.len() == 0) {
 			HgLog.Warning("FreightNetwork.FindSpine: Build failed");
-			return;
+			return false;
 		}
 
 		FreightNetwork.state.destIndustry = selected.destIndustry;
@@ -265,15 +262,14 @@ class FreightNetwork {
 		FreightNetwork.servedDests.rawset(selected.destIndustry, true);
 		FreightNetwork.servedSources.rawset(selected.srcIndustry, true);
 		FreightNetwork.state.lastBuiltRoute = newRoutes[0];
-		FreightNetwork.state.phase = FreightNetwork.PHASE_BUILD_JUNCTION;
-		HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to PHASE_BUILD_JUNCTION");
+		HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
+		return true;
 	}
 
 	function FreightNetwork::BuildJunctions() {
 		local route = FreightNetwork.state.lastBuiltRoute;
 		if(route == null) {
 			HgLog.Warning("FreightNetwork.BuildJunctions: lastBuiltRoute is null, skipping");
-			FreightNetwork.state.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
 			return;
 		}
 
@@ -286,7 +282,6 @@ class FreightNetwork {
 		if(arr2 == null) {
 			HgLog.Warning("FreightNetwork.BuildJunctions: pathDestToSrc is null, skipping junction build");
 			FreightNetwork.state.lastBuiltRoute = null;
-			FreightNetwork.state.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
 			return;
 		}
 		local result = FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);
@@ -317,18 +312,11 @@ class FreightNetwork {
 		}
 
 		FreightNetwork.state.lastBuiltRoute = null;
-		FreightNetwork.state.phase = FreightNetwork.PHASE_SEARCH_AND_CONNECT;
 	}
 
 	function FreightNetwork::SearchAndConnect() {
 		if(FreightNetwork.availableJunctions.len() == 0) {
-			HgLog.Info("FreightNetwork: all junctions exhausted, starting new network (id="
-				+ FreightNetwork.state.networkId + ")");
-			FreightNetwork.state.networkId++;
-			FreightNetwork.state.destIndustry = null;
-			FreightNetwork.state.destPlace = null;
-			FreightNetwork.state.phase = FreightNetwork.PHASE_FIND_SPINE;
-			return;
+			return false;
 		}
 
 		local ai = HogeAI.Get();
@@ -346,7 +334,7 @@ class FreightNetwork {
 			local mergeTile = (junc.leftTile != -1) ? junc.leftTile : junc.rightTile;
 			if(mergeTile == -1) {
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 
 			// Primary direction: away from dest
@@ -376,7 +364,7 @@ class FreightNetwork {
 				HgLog.Info("FreightNetwork.SearchAndConnect: junction exhausted at "
 					+ HgTile(mergeTile));
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 
 			// Compute the search bounding box for industry lookup
@@ -431,7 +419,7 @@ class FreightNetwork {
 				HgLog.Info("FreightNetwork.SearchAndConnect: no source in rectangle"
 					+ " junc=" + HgTile(mergeTile)
 					+ " primaryRadius=" + junc.primaryRadius);
-				return; // will retry next Step() call with larger rectangle
+				return false; // will retry next Step() call with larger rectangle
 			}
 
 			HgLog.Info("FreightNetwork.SearchAndConnect: found source "
@@ -442,7 +430,7 @@ class FreightNetwork {
 			if(srcPlace == null) {
 				HgLog.Warning("FreightNetwork.SearchAndConnect: Place.Get failed");
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 			local dist = AIMap.DistanceManhattan(found.tile,
 				AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
@@ -453,7 +441,7 @@ class FreightNetwork {
 			if(estimate == null) {
 				HgLog.Warning("FreightNetwork.SearchAndConnect: estimate null, skipping");
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 
 			local t = {
@@ -471,7 +459,7 @@ class FreightNetwork {
 			if(builder == null) {
 				HgLog.Warning("FreightNetwork.SearchAndConnect: CreateBuilder null");
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 			local newRoutes = builder.Build();
 			if(newRoutes == null) newRoutes = [];
@@ -479,16 +467,16 @@ class FreightNetwork {
 			if(newRoutes.len() == 0) {
 				HgLog.Warning("FreightNetwork.SearchAndConnect: Build failed");
 				FreightNetwork.availableJunctions.remove(ji);
-				return;
+				return false;
 			}
 
 			FreightNetwork.servedSources.rawset(found.industry, true);
 			FreightNetwork.availableJunctions.remove(ji);
 			FreightNetwork.state.lastBuiltRoute = newRoutes[0];
-			FreightNetwork.state.phase = FreightNetwork.PHASE_BUILD_JUNCTION;
 			HgLog.Info("FreightNetwork.SearchAndConnect: connected "
 				+ AIIndustry.GetName(found.industry)
-				+ ", advancing to PHASE_BUILD_JUNCTION");
-			return;
+				+ ", advancing to BuildJunctions");
+			return true;
 		}
+		return false;
 	}
