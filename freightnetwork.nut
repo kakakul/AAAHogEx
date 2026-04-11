@@ -315,157 +315,158 @@ class FreightNetwork {
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
 		local destTile = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
+		local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
 
-		// Process the first junction per Step() call — every branch returns,
-		// so subsequent junctions are tried on the next Step() invocation.
-		local ji = 0;
-		local junc = FreightNetwork.availableJunctions[ji];
-
-		// Pick active merge tile (prefer left)
-		local mergeTile = (junc.leftTile != -1) ? junc.leftTile : junc.rightTile;
-		if(mergeTile == -1) {
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-
-		// Primary direction: away from dest
-		local pDir = FreightNetwork.GetPrimaryDirection(destTile, mergeTile);
-		// Perpendicular axis (90-degree rotation of pDir)
-		local perpDx = pDir.dy;
-		local perpDy = -pDir.dx;
-
-		// Determine which perp side is "away from" the source industry
-		local srcTile = (junc.srcIndustry != -1)
-			? AIIndustry.GetLocation(junc.srcIndustry)
-			: mergeTile;
-		local srcPerpOffset = (AIMap.GetTileX(srcTile) - AIMap.GetTileX(mergeTile)) * perpDx
-			+ (AIMap.GetTileY(srcTile) - AIMap.GetTileY(mergeTile)) * perpDy;
-		local perpOutSign = (srcPerpOffset >= 0) ? -1 : 1;
-		local perpInSign = -perpOutSign;
-
-		// Expand rectangle
-		junc.primaryRadius += 10;
-		junc.perpOutRadius += 2;
-		junc.perpInRadius += 1;
-
-		// Check if primary extent exceeds map boundary
-		local pFarX = AIMap.GetTileX(mergeTile) + pDir.dx * junc.primaryRadius;
-		local pFarY = AIMap.GetTileY(mergeTile) + pDir.dy * junc.primaryRadius;
-		if(pFarX < 1 || pFarX >= mapW - 1 || pFarY < 1 || pFarY >= mapH - 1) {
-			HgLog.Info("FreightNetwork.SearchAndConnect: junction exhausted at "
-				+ HgTile(mergeTile));
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-
-		// Compute the search bounding box for industry lookup
-		local cx = AIMap.GetTileX(mergeTile);
-		local cy = AIMap.GetTileY(mergeTile);
-		local corners = [];
-		foreach(ps in [0, junc.primaryRadius]) {
-			foreach(po_sign in [[perpOutSign, junc.perpOutRadius], [perpInSign, junc.perpInRadius]]) {
-				corners.push([
-					cx + pDir.dx * ps + perpDx * po_sign[0] * po_sign[1],
-					cy + pDir.dy * ps + perpDy * po_sign[0] * po_sign[1]
-				]);
-			}
-		}
-		local minX = corners[0][0]; local maxX = corners[0][0];
-		local minY = corners[0][1]; local maxY = corners[0][1];
-		foreach(c in corners) {
-			if(c[0] < minX) minX = c[0];
-			if(c[0] > maxX) maxX = c[0];
-			if(c[1] < minY) minY = c[1];
-			if(c[1] > maxY) maxY = c[1];
-		}
-		minX = max(1, minX); maxX = min(mapW - 2, maxX);
-		minY = max(1, minY); maxY = min(mapH - 2, maxY);
-
-		// Scan all industries; check if location falls in bounding box
-		local found = null;
-		local industries = AIIndustryList();
-		foreach(indId, _ in industries) {
-			if(FreightNetwork.servedSources.rawin(indId)) continue;
-			local indLoc = AIIndustry.GetLocation(indId);
-			local ix = AIMap.GetTileX(indLoc);
-			local iy = AIMap.GetTileY(indLoc);
-			if(ix < minX || ix > maxX || iy < minY || iy > maxY) continue;
-
-			// Check this industry produces cargo accepted by destIndustry
-			local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
-			local srcType = AIIndustry.GetIndustryType(indId);
-			local matchCargo = -1;
-			foreach(dc, _ in AIIndustryType.GetAcceptedCargo(destType)) {
-				foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
-					if(pc == dc) { matchCargo = dc; break; }
+		// Outer loop: keep expanding all junctions in rounds until a source is found
+		// or all junctions are removed (primary extent exceeds map boundary).
+		while(FreightNetwork.availableJunctions.len() > 0) {
+			local ji = 0;
+			local anyActive = false;
+			while(ji < FreightNetwork.availableJunctions.len()) {
+				local junc = FreightNetwork.availableJunctions[ji];
+				local mergeTile = (junc.leftTile != -1) ? junc.leftTile : junc.rightTile;
+				if(mergeTile == -1) {
+					FreightNetwork.availableJunctions.remove(ji);
+					continue;
 				}
-				if(matchCargo != -1) break;
+
+				local pDir = FreightNetwork.GetPrimaryDirection(destTile, mergeTile);
+				local perpDx = pDir.dy;
+				local perpDy = -pDir.dx;
+				local srcTile = (junc.srcIndustry != -1)
+					? AIIndustry.GetLocation(junc.srcIndustry)
+					: mergeTile;
+				local srcPerpOffset =
+					(AIMap.GetTileX(srcTile) - AIMap.GetTileX(mergeTile)) * perpDx
+					+ (AIMap.GetTileY(srcTile) - AIMap.GetTileY(mergeTile)) * perpDy;
+				local perpOutSign = (srcPerpOffset >= 0) ? -1 : 1;
+				local perpInSign = -perpOutSign;
+
+				junc.primaryRadius += 10;
+				junc.perpOutRadius += 2;
+				junc.perpInRadius  += 1;
+
+				local pFarX = AIMap.GetTileX(mergeTile) + pDir.dx * junc.primaryRadius;
+				local pFarY = AIMap.GetTileY(mergeTile) + pDir.dy * junc.primaryRadius;
+				if(pFarX < 1 || pFarX >= mapW - 1 || pFarY < 1 || pFarY >= mapH - 1) {
+					HgLog.Info("FreightNetwork.SearchAndConnect: junction exhausted at "
+						+ HgTile(mergeTile));
+					FreightNetwork.availableJunctions.remove(ji);
+					continue;
+				}
+				anyActive = true;
+
+				// Compute bounding box
+				local cx = AIMap.GetTileX(mergeTile);
+				local cy = AIMap.GetTileY(mergeTile);
+				local corners = [];
+				foreach(ps in [0, junc.primaryRadius]) {
+					foreach(po_sign in [
+						[perpOutSign, junc.perpOutRadius],
+						[perpInSign,  junc.perpInRadius]
+					]) {
+						corners.push([
+							cx + pDir.dx * ps + perpDx * po_sign[0] * po_sign[1],
+							cy + pDir.dy * ps + perpDy * po_sign[0] * po_sign[1]
+						]);
+					}
+				}
+				local minX = corners[0][0]; local maxX = corners[0][0];
+				local minY = corners[0][1]; local maxY = corners[0][1];
+				foreach(c in corners) {
+					if(c[0] < minX) minX = c[0]; if(c[0] > maxX) maxX = c[0];
+					if(c[1] < minY) minY = c[1]; if(c[1] > maxY) maxY = c[1];
+				}
+				minX = max(1, minX); maxX = min(mapW - 2, maxX);
+				minY = max(1, minY); maxY = min(mapH - 2, maxY);
+
+				// Scan for matching source in bounding box
+				local found = null;
+				foreach(indId, _ in AIIndustryList()) {
+					if(FreightNetwork.servedSources.rawin(indId)) continue;
+					local indLoc = AIIndustry.GetLocation(indId);
+					local ix = AIMap.GetTileX(indLoc);
+					local iy = AIMap.GetTileY(indLoc);
+					if(ix < minX || ix > maxX || iy < minY || iy > maxY) continue;
+					local srcType = AIIndustry.GetIndustryType(indId);
+					local matchCargo = -1;
+					foreach(dc, _ in AIIndustryType.GetAcceptedCargo(destType)) {
+						foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
+							if(pc == dc) { matchCargo = dc; break; }
+						}
+						if(matchCargo != -1) break;
+					}
+					if(matchCargo == -1) continue;
+					found = {industry = indId, tile = indLoc, cargo = matchCargo};
+					break;
+				}
+
+				if(found != null) {
+					HgLog.Info("FreightNetwork.SearchAndConnect: found source "
+						+ AIIndustry.GetName(found.industry) + " at " + HgTile(found.tile));
+
+					local srcPlace = Place.Get(found.tile);
+					if(srcPlace == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: Place.Get failed");
+						FreightNetwork.availableJunctions.remove(ji);
+						return false;
+					}
+					local dist = AIMap.DistanceManhattan(found.tile,
+						AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
+					local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
+					local estimate = Route.Estimate(AIVehicle.VT_RAIL, found.cargo, dist,
+						max(1, AIIndustry.GetLastMonthProduction(found.industry, 0)),
+						false, infraTypes);
+					if(estimate == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: estimate null");
+						FreightNetwork.availableJunctions.remove(ji);
+						return false;
+					}
+					local t = {
+						src          = srcPlace,
+						dest         = FreightNetwork.state.destPlace,
+						cargo        = found.cargo,
+						vehicleType  = AIVehicle.VT_RAIL,
+						estimate     = estimate,
+						score        = estimate.value,
+						isBiDirectional = false,
+						notUseSingle = true,
+						viaWaypoint  = mergeTile,
+						explain      = AIIndustry.GetName(found.industry) + " -> "
+							+ AIIndustry.GetName(FreightNetwork.state.destIndustry)
+					};
+					local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
+					if(builder == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: CreateBuilder null");
+						FreightNetwork.availableJunctions.remove(ji);
+						return false;
+					}
+					local newRoutes = builder.Build();
+					if(newRoutes == null) newRoutes = [];
+					if(typeof newRoutes != "array") newRoutes = [newRoutes];
+					if(newRoutes.len() == 0) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: Build failed");
+						FreightNetwork.availableJunctions.remove(ji);
+						return false;
+					}
+					FreightNetwork.servedSources.rawset(found.industry, true);
+					FreightNetwork.availableJunctions.remove(ji);
+					FreightNetwork.state.lastBuiltRoute = newRoutes[0];
+					HgLog.Info("FreightNetwork.SearchAndConnect: connected "
+						+ AIIndustry.GetName(found.industry)
+						+ ", advancing to BuildJunctions");
+					return true;
+				}
+
+				HgLog.Info("FreightNetwork.SearchAndConnect: no source in rectangle"
+					+ " junc=" + HgTile(mergeTile)
+					+ " primaryRadius=" + junc.primaryRadius);
+				ji++;
 			}
-			if(matchCargo == -1) continue;
-			found = {industry = indId, tile = indLoc, cargo = matchCargo};
-			break;
+			// All junctions processed this round; if none are still active, stop
+			if(!anyActive) break;
 		}
 
-		if(found == null) {
-			HgLog.Info("FreightNetwork.SearchAndConnect: no source in rectangle"
-				+ " junc=" + HgTile(mergeTile)
-				+ " primaryRadius=" + junc.primaryRadius);
-			return false; // will retry next Step() call with larger rectangle
-		}
-
-		HgLog.Info("FreightNetwork.SearchAndConnect: found source "
-			+ AIIndustry.GetName(found.industry) + " at " + HgTile(found.tile));
-
-		// Build route to destination with junction as waypoint hint
-		local srcPlace = Place.Get(found.tile);
-		if(srcPlace == null) {
-			HgLog.Warning("FreightNetwork.SearchAndConnect: Place.Get failed");
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-		local dist = AIMap.DistanceManhattan(found.tile,
-			AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
-		local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
-		local estimate = Route.Estimate(AIVehicle.VT_RAIL, found.cargo, dist,
-			max(1, AIIndustry.GetLastMonthProduction(found.industry, 0)),
-			false, infraTypes);
-		if(estimate == null) {
-			HgLog.Warning("FreightNetwork.SearchAndConnect: estimate null, skipping");
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-
-		local t = {
-			src = srcPlace,
-			dest = FreightNetwork.state.destPlace,
-			cargo = found.cargo,
-			vehicleType = AIVehicle.VT_RAIL,
-			estimate = estimate,
-			score = estimate.value,
-			isBiDirectional = false,
-			viaWaypoint = mergeTile,
-			explain = AIIndustry.GetName(found.industry) + " -> " + AIIndustry.GetName(FreightNetwork.state.destIndustry)
-		};
-		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
-		if(builder == null) {
-			HgLog.Warning("FreightNetwork.SearchAndConnect: CreateBuilder null");
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-		local newRoutes = builder.Build();
-		if(newRoutes == null) newRoutes = [];
-		if(typeof newRoutes != "array") newRoutes = [newRoutes];
-		if(newRoutes.len() == 0) {
-			HgLog.Warning("FreightNetwork.SearchAndConnect: Build failed");
-			FreightNetwork.availableJunctions.remove(ji);
-			return false;
-		}
-
-		FreightNetwork.servedSources.rawset(found.industry, true);
-		FreightNetwork.availableJunctions.remove(ji);
-		FreightNetwork.state.lastBuiltRoute = newRoutes[0];
-		HgLog.Info("FreightNetwork.SearchAndConnect: connected "
-			+ AIIndustry.GetName(found.industry)
-			+ ", advancing to BuildJunctions");
-		return true;
+		HgLog.Info("FreightNetwork.SearchAndConnect: all junctions exhausted");
+		return false;
 	}
