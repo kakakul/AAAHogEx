@@ -117,153 +117,145 @@ class FreightNetwork {
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
 		local mapLongSide = max(mapW, mapH);
-		local maxRouteDist = (mapLongSide * 20) / 100;
+		local maxRouteDist = mapLongSide * 20 / 100;
+		local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
 
 		HgLog.Info("FreightNetwork.FindSpine: mapLongSide=" + mapLongSide
 			+ " maxRouteDist=" + maxRouteDist);
 
-		// Step 1: Collect all candidate pairs sorted by profitability.
-		// No distance or coastal pre-filtering — profitability rank drives selection.
-		local cargoPlaces = ai.GetMaxCargoPlaces();
-		local allCandidates = [];
-
-		foreach(srcInfo in cargoPlaces) {
-			if(CargoUtils.IsPaxOrMail(srcInfo.cargo)) continue;
-			if(!(srcInfo.place instanceof HgIndustry)) continue;
-			local srcLoc = srcInfo.place.GetLocation();
-			local srcIndustry = srcInfo.place.industry;
-			if(!AIIndustry.IsValidIndustry(srcIndustry)) continue;
-			if(FreightNetwork.servedSources.rawin(srcIndustry)) continue;
-
-			foreach(destInfo in ai.CreateRouteCandidates(
-					srcInfo.cargo, srcInfo.place,
-					{searchProducing = false}, 0, 4, {})) {
-				if(destInfo.estimate == null) continue;
-				if(!(destInfo.place instanceof HgIndustry)) continue;
-				local destLoc = destInfo.place.GetLocation();
-				local destIndustry = destInfo.place.industry;
-				if(!AIIndustry.IsValidIndustry(destIndustry)) continue;
-				if(FreightNetwork.servedDests.rawin(destIndustry)) continue;
-
-				allCandidates.push({
-					srcPlace = srcInfo.place,
-					destPlace = destInfo.place,
-					srcIndustry = srcIndustry,
-					destIndustry = destIndustry,
-					cargo = srcInfo.cargo,
-					estimate = destInfo.estimate,
-					value = destInfo.estimate.value,
-					srcLoc = srcLoc,
-					destLoc = destLoc
+		// Pre-build cargo->producers lookup once (reused across all edgePct iterations).
+		// TODO: industries only reachable by water (e.g. oil rigs) are silently skipped
+		// because Route.Estimate(VT_RAIL,...) returns null for them. A future pass should
+		// detect water-only industries and route them via ship or skip them explicitly.
+		local cargoProducers = {};
+		foreach(indId, _ in AIIndustryList()) {
+			if(FreightNetwork.servedSources.rawin(indId)) continue;
+			local indType = AIIndustry.GetIndustryType(indId);
+			foreach(cargo, _ in AIIndustryType.GetProducedCargo(indType)) {
+				if(CargoUtils.IsPaxOrMail(cargo)) continue;
+				if(!cargoProducers.rawin(cargo)) cargoProducers.rawset(cargo, []);
+				cargoProducers[cargo].push({
+					id  = indId,
+					loc = AIIndustry.GetLocation(indId)
 				});
 			}
 		}
 
-		if(allCandidates.len() == 0) {
-			HgLog.Info("FreightNetwork.FindSpine: no candidates found");
-			return false;
-		}
+		local allDests = AIIndustryList();
 
-		allCandidates.sort(function(a, b) { return b.value - a.value; });
-
-		// Step 2: Widen top-N% band until a candidate survives all filters.
-		// Within each band pick highest score = value * 1000 / (destMinEdgeDist + 1).
-		local selected = null;
-		for(local pct = 10; pct <= 100 && selected == null; pct += 10) {
-			local threshold = max(1, allCandidates.len() * pct / 100);
+		for(local edgePct = 10; edgePct <= 100; edgePct += 10) {
+			local edgeThresh = mapLongSide * edgePct / 100;
+			local bestCandidate = null;
 			local bestScore = -1;
 
-			for(local i = 0; i < threshold; i++) {
-				local c = allCandidates[i];
-
-				// Filter: route length < 20% of map long side
-				local dist = AIMap.DistanceManhattan(c.srcLoc, c.destLoc);
-				if(dist > maxRouteDist || dist == 0) continue;
-
-				// Filter: dest must be within 20% of map long side from the nearest edge
-				local destX = AIMap.GetTileX(c.destLoc);
-				local destY = AIMap.GetTileY(c.destLoc);
+			foreach(destId, _ in allDests) {
+				if(FreightNetwork.servedDests.rawin(destId)) continue;
+				local destLoc = AIIndustry.GetLocation(destId);
+				local destX = AIMap.GetTileX(destLoc);
+				local destY = AIMap.GetTileY(destLoc);
 				local dN = destY;
 				local dS = mapH - 1 - destY;
 				local dW = destX;
 				local dE = mapW - 1 - destX;
 				local minEdgeDist = min(min(dN, dS), min(dW, dE));
-				if(minEdgeDist > maxRouteDist) continue;
+				if(minEdgeDist > edgeThresh) continue;
 
-				// Filter: src must be guaranteed inland — the route vector (dest→src)
-				// must point away from the dest's nearest edge at < 45 degrees.
-				// GetPrimaryDirection returns the dominant unit axis; check sign points inland.
+				local destType = AIIndustry.GetIndustryType(destId);
+				foreach(cargo, _ in AIIndustryType.GetAcceptedCargo(destType)) {
+					if(CargoUtils.IsPaxOrMail(cargo)) continue;
+					if(!cargoProducers.rawin(cargo)) continue;
 
-				local pDir = FreightNetwork.GetPrimaryDirection(c.destLoc, c.srcLoc);
-				local inlandOk = false;
-				if(minEdgeDist == dN) {
-					inlandOk = (pDir.dy == 1);   // src south of dest: inland from north edge
-				} else if(minEdgeDist == dS) {
-					inlandOk = (pDir.dy == -1);  // src north of dest: inland from south edge
-				} else if(minEdgeDist == dW) {
-					inlandOk = (pDir.dx == 1);   // src east of dest: inland from west edge
-				} else {
-					inlandOk = (pDir.dx == -1);  // src west of dest: inland from east edge
+					foreach(src in cargoProducers[cargo]) {
+						if(src.id == destId) continue;
+						local dist = AIMap.DistanceManhattan(src.loc, destLoc);
+						if(dist == 0 || dist >= maxRouteDist) continue;
+
+						local pDir = FreightNetwork.GetPrimaryDirection(destLoc, src.loc);
+						local inlandOk = false;
+						if(minEdgeDist == dN)      inlandOk = (pDir.dy == 1);
+						else if(minEdgeDist == dS) inlandOk = (pDir.dy == -1);
+						else if(minEdgeDist == dW) inlandOk = (pDir.dx == 1);
+						else                       inlandOk = (pDir.dx == -1);
+						if(!inlandOk) continue;
+
+						local production = AIIndustry.GetLastMonthProduction(src.id, 0);
+						if(production <= 0) production = 1;
+						local estimate = Route.Estimate(
+							AIVehicle.VT_RAIL, cargo, dist, production, false, infraTypes);
+						if(estimate == null || estimate.value <= 0) continue;
+
+						local score = estimate.value * 1000 / (minEdgeDist + 1);
+						if(score > bestScore) {
+							bestScore = score;
+							bestCandidate = {
+								srcId      = src.id,
+								destId     = destId,
+								srcLoc     = src.loc,
+								destLoc    = destLoc,
+								cargo      = cargo,
+								estimate   = estimate,
+								score      = score,
+								minEdgeDist = minEdgeDist,
+								dist       = dist
+							};
+						}
+					}
 				}
-				if(!inlandOk) continue;
+			}
 
-				// Score = estProfit * 1 / (destMinEdgeDist + 1)
-				local score = (c.value * 1000) / (minEdgeDist + 1);
-				if(score > bestScore) {
-					bestScore = score;
-					c.score <- score;
-					c.minEdgeDist <- minEdgeDist;
-					selected = c;
+			if(bestCandidate != null) {
+				HgLog.Info("FreightNetwork.FindSpine: selected edgePct=" + edgePct
+					+ " src=" + AIIndustry.GetName(bestCandidate.srcId)
+					+ " dest=" + AIIndustry.GetName(bestCandidate.destId)
+					+ " score=" + bestCandidate.score
+					+ " dist=" + bestCandidate.dist
+					+ " minEdgeDist=" + bestCandidate.minEdgeDist);
+
+				local srcPlace = Place.Get(bestCandidate.srcLoc);
+				local destPlace = Place.Get(bestCandidate.destLoc);
+				if(srcPlace == null || destPlace == null) {
+					HgLog.Warning("FreightNetwork.FindSpine: Place.Get failed");
+					return false;
 				}
+
+				local t = {
+					src          = srcPlace,
+					dest         = destPlace,
+					cargo        = bestCandidate.cargo,
+					vehicleType  = AIVehicle.VT_RAIL,
+					estimate     = bestCandidate.estimate,
+					score        = bestCandidate.score,
+					isBiDirectional = false,
+					notUseSingle = true,
+					explain      = bestCandidate.estimate.value + " RAIL "
+						+ destPlace + "<=" + srcPlace
+						+ "[" + bestCandidate.cargo + "] dist:" + bestCandidate.dist
+				};
+				local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
+				if(builder == null) {
+					HgLog.Warning("FreightNetwork.FindSpine: CreateBuilder returned null");
+					return false;
+				}
+				local newRoutes = builder.Build();
+				if(newRoutes == null) newRoutes = [];
+				if(typeof newRoutes != "array") newRoutes = [newRoutes];
+				if(newRoutes.len() == 0) {
+					HgLog.Warning("FreightNetwork.FindSpine: Build failed");
+					return false;
+				}
+
+				FreightNetwork.state.destIndustry = bestCandidate.destId;
+				FreightNetwork.state.destPlace = destPlace;
+				FreightNetwork.servedDests.rawset(bestCandidate.destId, true);
+				FreightNetwork.servedSources.rawset(bestCandidate.srcId, true);
+				FreightNetwork.state.lastBuiltRoute = newRoutes[0];
+				HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
+				return true;
 			}
 		}
 
-		if(selected == null) {
-			HgLog.Info("FreightNetwork.FindSpine: no candidate survived filters");
-			return false;
-		}
-
-		HgLog.Info("FreightNetwork.FindSpine: selected src="
-			+ AIIndustry.GetName(selected.srcIndustry)
-			+ " dest=" + AIIndustry.GetName(selected.destIndustry)
-			+ " score=" + selected.score + " value=" + selected.value);
-
-		// Build route using the existing machinery
-		local dist = AIMap.DistanceManhattan(
-			selected.srcPlace.GetLocation(), selected.destPlace.GetLocation());
-		local t = {
-			src = selected.srcPlace,
-			dest = selected.destPlace,
-			cargo = selected.cargo,
-			vehicleType = AIVehicle.VT_RAIL,
-			estimate = selected.estimate,
-			score = selected.score,
-			isBiDirectional = false,
-			notUseSingle = true,
-			explain = selected.estimate.value + " RAIL "
-				+ selected.destPlace + "<=" + selected.srcPlace
-				+ "[" + selected.cargo + "] dist:" + dist
-		};
-		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
-		if(builder == null) {
-			HgLog.Warning("FreightNetwork.FindSpine: CreateBuilder returned null");
-			return false;
-		}
-		local newRoutes = builder.Build();
-		if(newRoutes == null) newRoutes = [];
-		if(typeof newRoutes != "array") newRoutes = [newRoutes];
-		if(newRoutes.len() == 0) {
-			HgLog.Warning("FreightNetwork.FindSpine: Build failed");
-			return false;
-		}
-
-		FreightNetwork.state.destIndustry = selected.destIndustry;
-		FreightNetwork.state.destPlace = selected.destPlace;
-		FreightNetwork.servedDests.rawset(selected.destIndustry, true);
-		FreightNetwork.servedSources.rawset(selected.srcIndustry, true);
-		FreightNetwork.state.lastBuiltRoute = newRoutes[0];
-		HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
-		return true;
+		HgLog.Info("FreightNetwork.FindSpine: no candidate survived filters");
+		return false;
 	}
 
 	function FreightNetwork::BuildJunctions() {
