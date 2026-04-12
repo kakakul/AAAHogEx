@@ -87,8 +87,7 @@ class FreightNetwork {
 		}
 		FreightNetwork.state.destPlace = null;
 		if(FreightNetwork.state.destIndustry != null) {
-			FreightNetwork.state.destPlace = Place.Get(
-				AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
+			FreightNetwork.state.destPlace = HgIndustry(FreightNetwork.state.destIndustry, false);
 		}
 		FreightNetwork.state.lastBuiltRoute = null;
 	}
@@ -217,12 +216,8 @@ class FreightNetwork {
 					+ " dist=" + bestCandidate.dist
 					+ " minEdgeDist=" + bestCandidate.minEdgeDist);
 
-				local srcPlace = Place.Get(bestCandidate.srcLoc);
-				local destPlace = Place.Get(bestCandidate.destLoc);
-				if(srcPlace == null || destPlace == null) {
-					HgLog.Warning("FreightNetwork.FindSpine: Place.Get failed");
-					return false;
-				}
+				local srcPlace = HgIndustry(bestCandidate.srcId, true);
+				local destPlace = HgIndustry(bestCandidate.destId, false);
 
 				local t = {
 					src          = srcPlace,
@@ -422,12 +417,7 @@ class FreightNetwork {
 					HgLog.Info("FreightNetwork.SearchAndConnect: found source "
 						+ AIIndustry.GetName(found.industry) + " at " + HgTile(found.tile));
 
-					local srcPlace = Place.Get(found.tile);
-					if(srcPlace == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: Place.Get failed");
-						FreightNetwork.availableJunctions.remove(ji);
-						continue;
-					}
+					local srcPlace = HgIndustry(found.industry, true);
 					local dist = AIMap.DistanceManhattan(found.tile,
 						AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
 					local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();

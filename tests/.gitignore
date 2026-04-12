@@ -1,1 +1,5 @@
 scripts/game_start.scr
+__pycache__/
+*.cfg
+!openttd_test.cfg
+*.dat

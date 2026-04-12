@@ -1,0 +1,40 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-11-freight-network-redesign.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Suppress ScanPlaces in network mode; add PaxMailOnly guard",
+      "status": "pending",
+      "description": "**Goal:** Prevent `_ScanPlaces` from running at all in network mode, and skip FreightNetwork entirely when the AI is configured for Pax/Mail only.\n\n**Files:**\n- Modify: `main.nut`\n- Modify: `freightnetwork.nut`\n\n**Acceptance Criteria:**\n- [ ] `_ScanPlaces` returns immediately when `IsNetworkMode()` is true\n- [ ] Per-candidate freight rail guard removed from `_ScanPlaces` while loop\n- [ ] `FreightNetwork.Step()` returns immediately when `HogeAI.Get().IsPaxMailOnly()` is true\n- [ ] All 5 existing tests pass\n\n**Verify:** `python -m pytest tests/test_integration.py -v` → 5 passed\n\n```json:metadata\n{\"files\": [\"main.nut\", \"freightnetwork.nut\"], \"verifyCommand\": \"python -m pytest tests/test_integration.py -v\", \"acceptanceCriteria\": [\"_ScanPlaces returns immediately when IsNetworkMode() is true\", \"Per-candidate freight rail guard removed\", \"FreightNetwork.Step() returns immediately when IsPaxMailOnly() is true\", \"All 5 existing tests pass\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Remove phase state machine; rewrite Step() orchestration",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Remove PHASE_* constants and state.phase; rewrite Step() to use state.destIndustry == null; add true/false return values to FindSpine and SearchAndConnect.\n\n**Files:**\n- Modify: `freightnetwork.nut`\n- Modify: `tests/test_integration.py`\n\n**Acceptance Criteria:**\n- [ ] PHASE_* constants removed from class\n- [ ] state.phase removed from static state table\n- [ ] Step() dispatches on state.destIndustry == null\n- [ ] FindSpine() returns true/false\n- [ ] SearchAndConnect() returns true/false\n- [ ] SaveStatics/LoadStatics updated\n- [ ] test_spine_built assertion updated to 'advancing to BuildJunctions'\n- [ ] All 5 existing tests pass\n\n**Verify:** `python -m pytest tests/test_integration.py -v` → 5 passed\n\n```json:metadata\n{\"files\": [\"freightnetwork.nut\", \"tests/test_integration.py\"], \"verifyCommand\": \"python -m pytest tests/test_integration.py -v\", \"acceptanceCriteria\": [\"PHASE_* constants removed\", \"state.phase removed\", \"Step() uses destIndustry == null\", \"FindSpine returns bool\", \"SearchAndConnect returns bool\", \"SaveStatics/LoadStatics updated\", \"All 5 tests pass\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Rewrite FindSpine as destination-first coastal scan",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Replace the all-pairs scan with destination-first approach using widening edge threshold (10%→100%), cargo→producers lookup, distance and inland-direction filters.\n\n**Files:**\n- Modify: `freightnetwork.nut` (FindSpine() body only)\n\n**Acceptance Criteria:**\n- [ ] Edge threshold starts at 10%, widens by 10% per cycle\n- [ ] cargo→producers lookup built once before widening loop\n- [ ] Uses AIIndustryType.GetProducedCargo (not AIIndustry.GetProducedCargo)\n- [ ] Pax/mail cargos skipped\n- [ ] Route length filter: 0 < dist < mapLongSide * 20 / 100\n- [ ] Inland filter uses GetPrimaryDirection with edge-direction sign check\n- [ ] Score = estimate.value * 1000 / (minEdgeDist + 1)\n- [ ] notUseSingle = true in t table\n- [ ] TODO comment for oil rigs present\n- [ ] All 5 tests pass\n\n**Verify:** `python -m pytest tests/test_integration.py -v` → 5 passed\n\n```json:metadata\n{\"files\": [\"freightnetwork.nut\"], \"verifyCommand\": \"python -m pytest tests/test_integration.py -v\", \"acceptanceCriteria\": [\"Destination-first scan with widening edge threshold\", \"cargo→producers lookup built once\", \"AIIndustryType.GetProducedCargo used\", \"All filters applied\", \"notUseSingle = true\", \"TODO comment present\", \"All 5 tests pass\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Rewrite SearchAndConnect to exhaust fully in one Step() call",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Replace single-junction-per-Step() bare block with nested loop that cycles all junctions in one call, expanding each by 10 tiles per round.\n\n**Files:**\n- Modify: `freightnetwork.nut` (SearchAndConnect() body only)\n\n**Acceptance Criteria:**\n- [ ] All junctions scanned in one Step() call\n- [ ] Each junction expands +10 primary, +2 perpOut, +1 perpIn per outer round\n- [ ] Junction removed when primary far-point exceeds map boundary\n- [ ] Returns true on successful connection\n- [ ] Returns false when all junctions exhausted\n- [ ] Uses AIIndustryType.GetAcceptedCargo/GetProducedCargo\n- [ ] notUseSingle = true in t table\n- [ ] All 5 tests pass\n\n**Verify:** `python -m pytest tests/test_integration.py -v` → 5 passed\n\n```json:metadata\n{\"files\": [\"freightnetwork.nut\"], \"verifyCommand\": \"python -m pytest tests/test_integration.py -v\", \"acceptanceCriteria\": [\"Full exhaust in one Step() call\", \"Nested loop structure correct\", \"Junction removal on boundary\", \"Correct return values\", \"AIIndustryType API used\", \"notUseSingle = true\", \"All 5 tests pass\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Add second parametrized seed to test_spine_built and test_source_connected",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Find a second fixed seed with a different coastal industry layout, update conftest.py, and add the seed as a parametrized case to the two layout-sensitive tests.\n\n**Files:**\n- Modify: `tests/conftest.py`\n- Modify: `tests/test_integration.py`\n\n**Acceptance Criteria:**\n- [ ] run_hognet accepts seed keyword argument (default SEED=42)\n- [ ] test_spine_built and test_source_connected parametrized with [42, NEW_SEED]\n- [ ] NEW_SEED produces valid layout and both tests pass\n- [ ] Other 3 tests remain seed=42 only\n- [ ] Total 7 tests pass\n\n**Verify:** `python -m pytest tests/test_integration.py -v` → 7 passed\n\n```json:metadata\n{\"files\": [\"tests/conftest.py\", \"tests/test_integration.py\"], \"verifyCommand\": \"python -m pytest tests/test_integration.py -v\", \"acceptanceCriteria\": [\"run_hognet accepts seed parameter\", \"test_spine_built parametrized\", \"test_source_connected parametrized\", \"NEW_SEED passes both tests\", \"7 total tests pass\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-11T00:00:00Z"
+}
