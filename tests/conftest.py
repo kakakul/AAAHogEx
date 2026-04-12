@@ -1,22 +1,19 @@
-import os
 import subprocess
 from collections import deque
 
-OPENTTD_EXE   = r'C:\Program Files (x86)\Steam\steamapps\common\OpenTTD\openttd.exe'
-STEAM_DIR     = r'C:\Program Files (x86)\Steam\steamapps\common\OpenTTD'
-TESTS_DIR     = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE   = os.path.join(TESTS_DIR, 'openttd_test.cfg')
-SCRIPTS_DIR   = os.path.join(TESTS_DIR, 'scripts')
+# WSL-based runner: OpenTTD 15.3 Linux binary inside WSL, output captured via stderr pipe.
+WSL_OPENTTD   = '/home/sy/openttd-15.3-linux-generic-amd64/openttd'
+WSL_SCRIPTS   = '/home/sy/.local/share/openttd/scripts'
 TICKS_PER_DAY = 74
 DEFAULT_SEED  = 42
 
-LOG_MARKER    = 'dbg: [script]'
+LOG_MARKER    = 'dbg: [script'
 CRASH_MARKER  = 'The script died unexpectedly'
 TAIL_LINES    = 20
 
 
 def run_hognet(network_mode=0, days=365 * 3, seed=DEFAULT_SEED, extra_params=()):
-    """Run HogNet headlessly and return {'output': str, 'error': bool}.
+    """Run HogNet headlessly via WSL and return {'output': str, 'error': bool}.
 
     'output' contains only lines that include the AI log marker or crash marker,
     plus up to TAIL_LINES lines of context before a detected crash.
@@ -31,24 +28,23 @@ def run_hognet(network_mode=0, days=365 * 3, seed=DEFAULT_SEED, extra_params=())
         params.append(f'{key}={value}')
     params_str = ','.join(params)
 
-    # Write game_start.scr
-    os.makedirs(SCRIPTS_DIR, exist_ok=True)
-    scr_path = os.path.join(SCRIPTS_DIR, 'game_start.scr')
-    with open(scr_path, 'w', encoding='utf-8') as f:
-        f.write(f'start_ai HogNet {params_str}\n')
-
     ticks = str(TICKS_PER_DAY * days)
 
+    # Write game_start.scr into WSL openttd personal dir via wsl bash
+    scr_content = f'start_ai HogNet {params_str}\\n'
+    subprocess.run(
+        ['wsl', 'bash', '-c', f'mkdir -p {WSL_SCRIPTS} && printf "{scr_content}" > {WSL_SCRIPTS}/game_start.scr'],
+        check=True,
+    )
+
     proc = subprocess.Popen(
-        [OPENTTD_EXE,
+        ['wsl', WSL_OPENTTD,
          '-g',
          '-G', str(seed),
          '-snull',
          '-mnull',
-         '-vnull:ticks=' + ticks,
-         '-d', 'script=5',
-         '-c', CONFIG_FILE],
-        cwd=STEAM_DIR,
+         '-v', 'null:ticks=' + ticks,
+         '-d', 'script=5'],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         encoding='utf-8',
@@ -68,7 +64,7 @@ def run_hognet(network_mode=0, days=365 * 3, seed=DEFAULT_SEED, extra_params=())
             break  # stop early; remaining ticks don't matter
 
     try:
-        proc.wait(timeout=120)
+        proc.wait(timeout=300)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
