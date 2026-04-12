@@ -122,7 +122,7 @@ class FreightNetwork {
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
 		local mapLongSide = max(mapW, mapH);
-		local maxRouteDist = mapLongSide * 20 / 100;
+		local maxRouteDist = max(mapLongSide * 20 / 100, 100);
 		local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
 
 		HgLog.Info("FreightNetwork.FindSpine: mapLongSide=" + mapLongSide
@@ -175,16 +175,18 @@ class FreightNetwork {
 						local dist = AIMap.DistanceManhattan(src.loc, destLoc);
 						if(dist == 0 || dist >= maxRouteDist) continue;
 
-						local pDir = FreightNetwork.GetPrimaryDirection(destLoc, src.loc);
-						local inlandOk = false;
-						if(minEdgeDist == dN)      inlandOk = (pDir.dy == 1);
-						else if(minEdgeDist == dS) inlandOk = (pDir.dy == -1);
-						else if(minEdgeDist == dW) inlandOk = (pDir.dx == 1);
-						else                       inlandOk = (pDir.dx == -1);
-						if(!inlandOk) continue;
+						if(edgePct < 100) {
+							local pDir = FreightNetwork.GetPrimaryDirection(destLoc, src.loc);
+							local inlandOk = false;
+							if(minEdgeDist == dN)      inlandOk = (pDir.dy == 1);
+							else if(minEdgeDist == dS) inlandOk = (pDir.dy == -1);
+							else if(minEdgeDist == dW) inlandOk = (pDir.dx == 1);
+							else                       inlandOk = (pDir.dx == -1);
+							if(!inlandOk) continue;
+						}
 
-						local production = AIIndustry.GetLastMonthProduction(src.id, 0);
-						if(production <= 0) production = 1;
+						local production = AIIndustry.GetLastMonthProduction(src.id, cargo);
+						if(production <= 0) production = 80; // floor for month 0 before any production recorded
 						local estimate = Route.Estimate(
 							AIVehicle.VT_RAIL, cargo, dist, production, false, infraTypes);
 						if(estimate == null || estimate.value <= 0) continue;
