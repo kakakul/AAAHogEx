@@ -17,6 +17,8 @@ class FreightNetwork {
 	static servedSources = {};
 	// Industry IDs already serving as destinations (across all networks, never cleared)
 	static servedDests = {};
+	// Pairs that failed pathfinding: key = "srcId-destId", never retried
+	static failedPairs = {};
 }
 
 	function FreightNetwork::Step() {
@@ -61,7 +63,8 @@ class FreightNetwork {
 			availableJunctions = junctions,
 			networkId = FreightNetwork.state.networkId,
 			servedSources = FreightNetwork.servedSources,
-			servedDests = FreightNetwork.servedDests
+			servedDests = FreightNetwork.servedDests,
+			failedPairs = FreightNetwork.failedPairs
 		};
 	}
 
@@ -74,6 +77,8 @@ class FreightNetwork {
 		foreach(k, v in fn.servedSources) FreightNetwork.servedSources.rawset(k, v);
 		FreightNetwork.servedDests.clear();
 		foreach(k, v in fn.servedDests) FreightNetwork.servedDests.rawset(k, v);
+		FreightNetwork.failedPairs.clear();
+		if(fn.rawin("failedPairs")) foreach(k, v in fn.failedPairs) FreightNetwork.failedPairs.rawset(k, v);
 		FreightNetwork.availableJunctions.clear();
 		foreach(j in fn.availableJunctions) {
 			FreightNetwork.availableJunctions.push({
@@ -122,11 +127,9 @@ class FreightNetwork {
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
 		local mapLongSide = max(mapW, mapH);
-		local maxRouteDist = max(mapLongSide * 20 / 100, 100);
 		local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
 
-		HgLog.Info("FreightNetwork.FindSpine: mapLongSide=" + mapLongSide
-			+ " maxRouteDist=" + maxRouteDist);
+		HgLog.Info("FreightNetwork.FindSpine: mapLongSide=" + mapLongSide);
 
 		// Pre-build cargo->producers lookup once (reused across all edgePct iterations).
 		// TODO: industries only reachable by water (e.g. oil rigs) are silently skipped
@@ -150,6 +153,7 @@ class FreightNetwork {
 
 		for(local edgePct = 10; edgePct <= 100; edgePct += 10) {
 			local edgeThresh = mapLongSide * edgePct / 100;
+			local maxRouteDist = max(mapLongSide * edgePct / 100, 100);
 			local bestCandidate = null;
 			local bestScore = -1;
 
@@ -172,8 +176,9 @@ class FreightNetwork {
 
 					foreach(src in cargoProducers[cargo]) {
 						if(src.id == destId) continue;
+						if(FreightNetwork.failedPairs.rawin(src.id + "-" + destId)) continue;
 						local dist = AIMap.DistanceManhattan(src.loc, destLoc);
-						if(dist == 0 || dist >= maxRouteDist) continue;
+						if(dist < 30 || dist >= maxRouteDist) continue;
 
 						if(edgePct < 100) {
 							local pDir = FreightNetwork.GetPrimaryDirection(destLoc, src.loc);
@@ -243,7 +248,9 @@ class FreightNetwork {
 				if(newRoutes == null) newRoutes = [];
 				if(typeof newRoutes != "array") newRoutes = [newRoutes];
 				if(newRoutes.len() == 0) {
-					HgLog.Warning("FreightNetwork.FindSpine: Build failed");
+					HgLog.Warning("FreightNetwork.FindSpine: Build failed, blacklisting pair src="
+						+ bestCandidate.srcId + " dest=" + bestCandidate.destId);
+					FreightNetwork.failedPairs.rawset(bestCandidate.srcId + "-" + bestCandidate.destId, true);
 					return false;
 				}
 
