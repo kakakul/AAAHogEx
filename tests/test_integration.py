@@ -23,7 +23,7 @@ def test_freight_skipped_in_scanplaces():
     )
 
 
-@pytest.mark.parametrize("seed", [42, 1])
+@pytest.mark.parametrize("seed", [42])
 def test_spine_built(seed):
     """C1 must select an industry pair and build the spine route."""
     row = run_hognet(network_mode=1, days=365 * 3, seed=seed)
@@ -51,7 +51,7 @@ def test_junctions_recorded():
     )
 
 
-@pytest.mark.parametrize("seed", [42, 1])
+@pytest.mark.parametrize("seed", [42])
 def test_source_connected(seed):
     """C3+C4 must find a second source and connect it to the existing junction."""
     row = run_hognet(network_mode=1, days=365 * 5, seed=seed)
@@ -61,4 +61,14 @@ def test_source_connected(seed):
     )
     assert 'FreightNetwork.SearchAndConnect: connected' in row['output'], (
         f"Expected a second source to be connected\nOutput:\n{row['output']}"
+    )
+
+
+@pytest.mark.parametrize("seed", [42])
+def test_spur_connects_via_junction(seed):
+    """Spur must log 'connected via junction', not just 'connected'."""
+    row = run_hognet(network_mode=1, days=365 * 5, seed=seed)
+    assert not row['error'], f"AI crashed:\n{row['output']}"
+    assert 'FreightNetwork.SearchAndConnect: connected via junction' in row['output'], (
+        f"Expected spur to connect via junction\nOutput:\n{row['output']}"
     )

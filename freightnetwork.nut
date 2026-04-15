@@ -170,7 +170,9 @@ class FreightNetwork {
 				if(minEdgeDist > edgeThresh) continue;
 
 				local destType = AIIndustry.GetIndustryType(destId);
-				foreach(cargo, _ in AIIndustryType.GetAcceptedCargo(destType)) {
+				local infraTypes = AIIndustryType.GetAcceptedCargo(destType);
+				if(infraTypes == null) continue;
+				foreach(cargo, _ in infraTypes) {
 					if(CargoUtils.IsPaxOrMail(cargo)) continue;
 					if(!cargoProducers.rawin(cargo)) continue;
 
@@ -286,7 +288,14 @@ class FreightNetwork {
 			FreightNetwork.state.lastBuiltRoute = null;
 			return;
 		}
-		local result = FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);
+		// Scan a wider range of the path to find a suitable junction location.
+		// minDist=10 skips the first 10 tiles (near the station platform/depot).
+		// maxDist is capped to leave 4 tiles at the far end but allow coverage
+		// of the middle of short routes.
+		local pathLen = arr2.len();
+		local jMinDist = 10;
+		local jMaxDist = max(30, pathLen - 10);
+		local result = FourWayJunction.TryBuildNearStation(arr2, arr1, jMinDist, jMaxDist, true);
 
 		local srcLoc = (route.srcHgStation != null && route.srcHgStation.place != null)
 			? route.srcHgStation.place.GetLocation()
@@ -301,6 +310,10 @@ class FreightNetwork {
 			FreightNetwork.availableJunctions.push({
 				leftTile = result.leftTile,
 				rightTile = result.rightTile,
+				leftPath = result.leftPath,
+				rightPath = result.rightPath,
+				leftInboundPath = result.leftInboundPath,
+				rightInboundPath = result.rightInboundPath,
 				srcIndustry = srcIndustry,
 				primaryRadius = 0,
 				perpOutRadius = 0,
@@ -313,7 +326,7 @@ class FreightNetwork {
 			HgLog.Warning("FreightNetwork.BuildJunctions: no junctions built near source");
 		}
 
-		FreightNetwork.state.lastBuiltRoute = null;
+		// Do NOT clear lastBuiltRoute here — SearchAndConnect needs it to access spine paths/stations.
 	}
 
 	function FreightNetwork::SearchAndConnect() {
@@ -426,51 +439,196 @@ class FreightNetwork {
 					HgLog.Info("FreightNetwork.SearchAndConnect: found source "
 						+ AIIndustry.GetName(found.industry) + " at " + HgTile(found.tile));
 
+					local spineRoute = FreightNetwork.state.lastBuiltRoute;
+					if(spineRoute == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: lastBuiltRoute null, skipping");
+						FreightNetwork.availableJunctions.remove(ji);
+						continue;
+					}
+
+					local engineSet = spineRoute.GetLatestEngineSet();
+					if(engineSet == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: engineSet null, skipping");
+						FreightNetwork.availableJunctions.remove(ji);
+						continue;
+					}
+
+					// Build src station
 					local srcPlace = HgIndustry(found.industry, true);
-					local dist = AIMap.DistanceManhattan(found.tile,
-						AIIndustry.GetLocation(FreightNetwork.state.destIndustry));
-					local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
-					local estimate = Route.Estimate(AIVehicle.VT_RAIL, found.cargo, dist,
-						max(1, AIIndustry.GetLastMonthProduction(found.industry, 0)),
-						false, infraTypes);
-					if(estimate == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: estimate null");
+					local destTile2 = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
+					local srcStationFactory = SrcRailStationFactory();
+					srcStationFactory.platformLength = spineRoute.GetPlatformLength();
+					local srcHgStation = srcStationFactory.CreateBest(srcPlace, found.cargo, destTile2);
+					if(srcHgStation == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: failed to build src station, blacklisting");
+						FreightNetwork.servedSources.rawset(found.industry, true);
+						ji++;
+						continue;
+					}
+					srcHgStation.cargo = found.cargo;
+					srcHgStation.isSourceStation = true;
+					if(!srcHgStation.BuildExec()) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: srcHgStation.BuildExec failed");
+						ji++;
+						continue;
+					}
+
+					// Determine which junction arm connects to which spine direction.
+					// Each RightDivergeJunction has two arms:
+					//   inbound arm (At(2,2) end): spur trains MERGE INTO spine → for leg 1 (spur→dest)
+					//   outbound arm (At(3,1) end): spine trains DIVERGE to spur → for leg 2 (return)
+					// The inbound arm's deepest tile (At(0,-1)) is on one of the two spine paths.
+					// If it's on pathSrcToDest, that junction handles leg1=inbound, leg2=outbound.
+					// Otherwise use the other junction (leftJ vs rightJ are on opposite spine sides).
+					local srcToDestSet = {};
+					foreach(t in spineRoute.pathSrcToDest.array_) srcToDestSet.rawset(t, true);
+
+					local leg1Tiles = null; // inbound arm → leg 1 (spur→dest)
+					local leg2Tiles = null; // outbound arm → leg 2 (dest→spur)
+
+					if(junc.leftInboundPath != null && junc.leftPath != null) {
+						local deepest = junc.leftInboundPath[junc.leftInboundPath.len() - 1];
+						if(srcToDestSet.rawin(deepest)) {
+							leg1Tiles = junc.leftInboundPath;
+							leg2Tiles = junc.leftPath;
+						}
+					}
+					if(leg1Tiles == null && junc.rightInboundPath != null && junc.rightPath != null) {
+						local deepest = junc.rightInboundPath[junc.rightInboundPath.len() - 1];
+						if(srcToDestSet.rawin(deepest)) {
+							leg1Tiles = junc.rightInboundPath;
+							leg2Tiles = junc.rightPath;
+						}
+					}
+					if(leg1Tiles == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: cannot determine junction direction, skipping");
+						srcHgStation.Remove();
 						FreightNetwork.availableJunctions.remove(ji);
 						continue;
 					}
-					local t = {
-						src          = srcPlace,
-						dest         = FreightNetwork.state.destPlace,
-						cargo        = found.cargo,
-						vehicleType  = AIVehicle.VT_RAIL,
-						estimate     = estimate,
-						score        = estimate.value,
+
+					// Use spine sub-paths ending just before each arm's deepest spine tile.
+					// The pathfinder enters the junction from the spine side, following the
+					// arm's existing rail direction, so DoBuild never demolishes shared tiles.
+					local leg1DeepestTile = leg1Tiles[leg1Tiles.len() - 1];
+					local leg2DeepestTile = leg2Tiles[leg2Tiles.len() - 1];
+
+					if(spineRoute.pathDestToSrc == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: pathDestToSrc null, skipping");
+						srcHgStation.Remove();
+						ji++;
+						continue;
+					}
+					local spinePathFwd = spineRoute.pathSrcToDest.path.SubPathEnd(leg1DeepestTile);
+					local spinePathRev = spineRoute.pathDestToSrc.path.SubPathEnd(leg2DeepestTile);
+
+					if(spinePathFwd == null || spinePathFwd.GetParent() == null
+							|| spinePathFwd.GetParent().GetParent() == null
+							|| spinePathFwd.GetParent().GetParent().GetParent() == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: spine fwd sub-path too short");
+						srcHgStation.Remove();
+						ji++;
+						continue;
+					}
+					if(spinePathRev == null || spinePathRev.GetParent() == null
+							|| spinePathRev.GetParent().GetParent() == null
+							|| spinePathRev.GetParent().GetParent().GetParent() == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: spine rev sub-path too short");
+						srcHgStation.Remove();
+						ji++;
+						continue;
+					}
+
+					local pathBuildParams = {
+						engine          = engineSet.engine,
+						cargo           = found.cargo,
+						platformLength  = spineRoute.GetPlatformLength(),
+						distance        = AIMap.DistanceManhattan(found.tile, destTile2),
+						isTransfer      = false,
 						isBiDirectional = false,
-						notUseSingle = true,
-						viaWaypoint  = mergeTile,
-						explain      = AIIndustry.GetName(found.industry) + " -> "
-							+ AIIndustry.GetName(FreightNetwork.state.destIndustry)
+						isSingle        = false
 					};
-					local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
-					if(builder == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: CreateBuilder null");
-						FreightNetwork.availableJunctions.remove(ji);
+
+					// Leg 1: spine → src station via inbound arm
+					// PathToStation internally calls srcPathGetter.Get().Reverse() then GetStartArray.
+					local temp_fwd = spinePathFwd;
+					local builder1 = RailPathBuilder();
+					builder1.PathToStation(
+						GetterFunction(function():(temp_fwd) {
+							return temp_fwd;
+						}),
+						srcHgStation,
+						HogeAI.Get().pathFindLimit,
+						HogeAI.Get(),
+						null,
+						true
+					);
+					builder1.pathBuildParams = pathBuildParams;
+					builder1.isReverse = false;
+					builder1.isRevReverse = false;
+					if(!builder1.Build()) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: outbound spur build failed");
+						srcHgStation.Remove();
+						ji++;
 						continue;
 					}
-					local newRoutes = builder.Build();
-					if(newRoutes == null) newRoutes = [];
-					if(typeof newRoutes != "array") newRoutes = [newRoutes];
-					if(newRoutes.len() == 0) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: Build failed");
-						FreightNetwork.availableJunctions.remove(ji);
+					local builtPath1 = builder1.buildedPath;
+
+					// Leg 2: src station → spine via outbound arm
+					local temp_rev = spinePathRev;
+					local builder2 = RailPathBuilder();
+					builder2.PathToStation(
+						GetterFunction(function():(temp_rev) {
+							return temp_rev;
+						}),
+						srcHgStation,
+						HogeAI.Get().pathFindLimit,
+						HogeAI.Get(),
+						builtPath1.path,
+						false
+					);
+					builder2.pathBuildParams = pathBuildParams;
+					builder2.isReverse = true;
+					builder2.isRevReverse = false;
+					if(!builder2.Build()) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: return spur build failed");
+						builtPath1.Remove();
+						srcHgStation.Remove();
+						ji++;
 						continue;
 					}
+					local builtPath2 = builder2.buildedPath;
+
+					// Create TrainRoute (auto-registers in Route.allRoutes via constructor)
+					local newRoute = TrainRoute(
+						TrainRoute.RT_ROOT,
+						found.cargo,
+						srcHgStation,
+						spineRoute.destHgStation,
+						builtPath1,
+						builtPath2
+					);
+					newRoute.isBiDirectional = false;
+					newRoute.isTransfer = false;
+					newRoute.isSrcTransfer = false;
+					newRoute.startDate = AIDate.GetCurrentDate();
+					newRoute.latestEngineSet = engineSet;
+					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
+					newRoute.destDepot = spineRoute.destDepot;
+					newRoute.Initialize();
+					newRoute.CalculateUseDepots();
+
+					// Deploy initial train; skip DoPostBuild to avoid uncontrolled extensions
+					if(!newRoute.BuildFirstTrain()) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: BuildFirstTrain failed, continuing");
+					}
+
 					FreightNetwork.servedSources.rawset(found.industry, true);
 					FreightNetwork.availableJunctions.remove(ji);
-					FreightNetwork.state.lastBuiltRoute = newRoutes[0];
-					HgLog.Info("FreightNetwork.SearchAndConnect: connected "
+					HgLog.Info("FreightNetwork.SearchAndConnect: connected via junction "
 						+ AIIndustry.GetName(found.industry)
-						+ ", advancing to BuildJunctions");
+						+ " -> "
+						+ AIIndustry.GetName(FreightNetwork.state.destIndustry));
 					return true;
 				}
 
