@@ -507,37 +507,15 @@ class FreightNetwork {
 						continue;
 					}
 
-					// Use spine sub-paths ending just before each arm's deepest spine tile.
-					// The pathfinder enters the junction from the spine side, following the
-					// arm's existing rail direction, so DoBuild never demolishes shared tiles.
-					local leg1DeepestTile = leg1Tiles[leg1Tiles.len() - 1];
-					local leg2DeepestTile = leg2Tiles[leg2Tiles.len() - 1];
-
-					if(spineRoute.pathDestToSrc == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: pathDestToSrc null, skipping");
-						srcHgStation.Remove();
-						ji++;
-						continue;
-					}
-					local spinePathFwd = spineRoute.pathSrcToDest.path.SubPathEnd(leg1DeepestTile);
-					local spinePathRev = spineRoute.pathDestToSrc.path.SubPathEnd(leg2DeepestTile);
-
-					if(spinePathFwd == null || spinePathFwd.GetParent() == null
-							|| spinePathFwd.GetParent().GetParent() == null
-							|| spinePathFwd.GetParent().GetParent().GetParent() == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: spine fwd sub-path too short");
-						srcHgStation.Remove();
-						ji++;
-						continue;
-					}
-					if(spinePathRev == null || spinePathRev.GetParent() == null
-							|| spinePathRev.GetParent().GetParent() == null
-							|| spinePathRev.GetParent().GetParent().GetParent() == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: spine rev sub-path too short");
-						srcHgStation.Remove();
-						ji++;
-						continue;
-					}
+					// Arm paths are stored outermost-first: leg1Tiles[0] = arm outer tip.
+					// We pass the arm-tip start tuple directly to Initialize, bypassing
+					// PathToStation's GetStartArray so the pathfinder starts exactly at
+					// the arm outer tip heading away from the junction, not at a spine tile.
+					//
+					// Leg 1 (inbound arm): cur=leg1Tiles[0]=At(2,2), came from leg1Tiles[1]=At(2,1)
+					// Leg 2 (outbound arm): cur=leg2Tiles[0]=At(3,1), came from leg2Tiles[1]=At(2,1)
+					local arm1Start = [[leg1Tiles[0], leg1Tiles[1], leg1Tiles[2], leg1Tiles[3]]];
+					local arm2Start = [[leg2Tiles[0], leg2Tiles[1], leg2Tiles[2], leg2Tiles[3]]];
 
 					local pathBuildParams = {
 						engine          = engineSet.engine,
@@ -549,20 +527,23 @@ class FreightNetwork {
 						isSingle        = false
 					};
 
-					// Leg 1: spine → src station via inbound arm
-					// PathToStation internally calls srcPathGetter.Get().Reverse() then GetStartArray.
-					local temp_fwd = spinePathFwd;
+					// Leg 1: from inbound arm tip to src station (arrival direction)
+					local ignoreTiles1 = [];
+					ignoreTiles1.extend(srcHgStation.GetDeparturesTile());
+					ignoreTiles1.extend(srcHgStation.GetIgnoreTiles());
 					local builder1 = RailPathBuilder();
-					builder1.PathToStation(
-						GetterFunction(function():(temp_fwd) {
-							return temp_fwd;
-						}),
-						srcHgStation,
+					builder1.Initialize(
+						Container(arm1Start),
+						Container(srcHgStation.GetArrivalsTiles()),
+						ignoreTiles1,
 						HogeAI.Get().pathFindLimit,
 						HogeAI.Get(),
-						null,
-						true
+						null
 					);
+					builder1.dangerTiles = srcHgStation.GetDepartureDangerTiles();
+					foreach(goalTiles in srcHgStation.GetDeparturesTiles()) {
+						RailPathFinder.SetRevOkTiles(builder1.revOkTiles, goalTiles);
+					}
 					builder1.pathBuildParams = pathBuildParams;
 					builder1.isReverse = false;
 					builder1.isRevReverse = false;
@@ -574,19 +555,23 @@ class FreightNetwork {
 					}
 					local builtPath1 = builder1.buildedPath;
 
-					// Leg 2: src station → spine via outbound arm
-					local temp_rev = spinePathRev;
+					// Leg 2: from outbound arm tip to src station (departure direction)
+					local ignoreTiles2 = [];
+					ignoreTiles2.extend(srcHgStation.GetArrivalsTile());
+					ignoreTiles2.extend(srcHgStation.GetIgnoreTiles());
 					local builder2 = RailPathBuilder();
-					builder2.PathToStation(
-						GetterFunction(function():(temp_rev) {
-							return temp_rev;
-						}),
-						srcHgStation,
+					builder2.Initialize(
+						Container(arm2Start),
+						Container(srcHgStation.GetDeparturesTiles()),
+						ignoreTiles2,
 						HogeAI.Get().pathFindLimit,
 						HogeAI.Get(),
-						builtPath1.path,
-						false
+						builtPath1.path
 					);
+					builder2.dangerTiles = srcHgStation.GetArrivalDangerTiles();
+					foreach(goalTiles in srcHgStation.GetArrivalsTiles()) {
+						RailPathFinder.SetRevOkTiles(builder2.revOkTiles, goalTiles);
+					}
 					builder2.pathBuildParams = pathBuildParams;
 					builder2.isReverse = true;
 					builder2.isRevReverse = false;
