@@ -528,7 +528,7 @@ class FreightNetwork {
 						isSingle        = false
 					};
 
-					// Leg 1 (pathSrcToDest, isReverse=false): inbound arm tip → spur departures.
+					// Leg 1 (pathSrcToDest, isReverse=true): inbound arm tip → spur departures.
 					// The forward trip (spur→dest) uses the inbound arm: trains depart spur
 					// station, travel spur track, merge at At(2,2) onto x=0 spine toward dest.
 					// Goals = GetDeparturesTiles so signals face: spur_departures → At(2,2).
@@ -549,7 +549,7 @@ class FreightNetwork {
 						RailPathFinder.SetRevOkTiles(builder1.revOkTiles, goalTiles);
 					}
 					builder1.pathBuildParams = pathBuildParams;
-					builder1.isReverse = false;
+					builder1.isReverse = true;
 					builder1.isRevReverse = false;
 					if(!builder1.Build()) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: outbound spur build failed");
@@ -559,7 +559,7 @@ class FreightNetwork {
 					}
 					local builtPath1 = builder1.buildedPath;
 
-					// Leg 2 (pathDestToSrc, isReverse=true): outbound arm tip → spur arrivals.
+					// Leg 2 (pathDestToSrc, isReverse=false): outbound arm tip → spur arrivals.
 					// The return trip (dest→spur) uses the outbound arm: trains exit x=1 spine
 					// at At(3,1), travel spur track, arrive at spur station arrivals.
 					// Goals = GetArrivalsTiles so signals face: At(3,1) → spur_arrivals.
@@ -580,7 +580,7 @@ class FreightNetwork {
 						RailPathFinder.SetRevOkTiles(builder2.revOkTiles, goalTiles);
 					}
 					builder2.pathBuildParams = pathBuildParams;
-					builder2.isReverse = true;
+					builder2.isReverse = false;
 					builder2.isRevReverse = false;
 					if(!builder2.Build()) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: return spur build failed");
