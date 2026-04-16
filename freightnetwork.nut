@@ -431,6 +431,7 @@ class FreightNetwork {
 						if(matchCargo != -1) break;
 					}
 					if(matchCargo == -1) continue;
+					if(AIMap.DistanceManhattan(indLoc, mergeTile) < 30) continue;
 					found = {industry = indId, tile = indLoc, cargo = matchCargo};
 					break;
 				}
@@ -527,21 +528,24 @@ class FreightNetwork {
 						isSingle        = false
 					};
 
-					// Leg 1: from inbound arm tip to src station (arrival direction)
+					// Leg 1 (pathSrcToDest, isReverse=false): inbound arm tip → spur departures.
+					// The forward trip (spur→dest) uses the inbound arm: trains depart spur
+					// station, travel spur track, merge at At(2,2) onto x=0 spine toward dest.
+					// Goals = GetDeparturesTiles so signals face: spur_departures → At(2,2).
 					local ignoreTiles1 = [];
-					ignoreTiles1.extend(srcHgStation.GetDeparturesTile());
+					ignoreTiles1.extend(srcHgStation.GetArrivalsTile());
 					ignoreTiles1.extend(srcHgStation.GetIgnoreTiles());
 					local builder1 = RailPathBuilder();
 					builder1.Initialize(
 						Container(arm1Start),
-						Container(srcHgStation.GetArrivalsTiles()),
+						Container(srcHgStation.GetDeparturesTiles()),
 						ignoreTiles1,
 						HogeAI.Get().pathFindLimit,
 						HogeAI.Get(),
 						null
 					);
-					builder1.dangerTiles = srcHgStation.GetDepartureDangerTiles();
-					foreach(goalTiles in srcHgStation.GetDeparturesTiles()) {
+					builder1.dangerTiles = srcHgStation.GetArrivalDangerTiles();
+					foreach(goalTiles in srcHgStation.GetArrivalsTiles()) {
 						RailPathFinder.SetRevOkTiles(builder1.revOkTiles, goalTiles);
 					}
 					builder1.pathBuildParams = pathBuildParams;
@@ -555,21 +559,24 @@ class FreightNetwork {
 					}
 					local builtPath1 = builder1.buildedPath;
 
-					// Leg 2: from outbound arm tip to src station (departure direction)
+					// Leg 2 (pathDestToSrc, isReverse=true): outbound arm tip → spur arrivals.
+					// The return trip (dest→spur) uses the outbound arm: trains exit x=1 spine
+					// at At(3,1), travel spur track, arrive at spur station arrivals.
+					// Goals = GetArrivalsTiles so signals face: At(3,1) → spur_arrivals.
 					local ignoreTiles2 = [];
-					ignoreTiles2.extend(srcHgStation.GetArrivalsTile());
+					ignoreTiles2.extend(srcHgStation.GetDeparturesTile());
 					ignoreTiles2.extend(srcHgStation.GetIgnoreTiles());
 					local builder2 = RailPathBuilder();
 					builder2.Initialize(
 						Container(arm2Start),
-						Container(srcHgStation.GetDeparturesTiles()),
+						Container(srcHgStation.GetArrivalsTiles()),
 						ignoreTiles2,
 						HogeAI.Get().pathFindLimit,
 						HogeAI.Get(),
 						builtPath1.path
 					);
-					builder2.dangerTiles = srcHgStation.GetArrivalDangerTiles();
-					foreach(goalTiles in srcHgStation.GetArrivalsTiles()) {
+					builder2.dangerTiles = srcHgStation.GetDepartureDangerTiles();
+					foreach(goalTiles in srcHgStation.GetDeparturesTiles()) {
 						RailPathFinder.SetRevOkTiles(builder2.revOkTiles, goalTiles);
 					}
 					builder2.pathBuildParams = pathBuildParams;
@@ -610,6 +617,9 @@ class FreightNetwork {
 
 					FreightNetwork.servedSources.rawset(found.industry, true);
 					FreightNetwork.availableJunctions.remove(ji);
+					// Update lastBuiltRoute so BuildJunctions (called from Step after we
+					// return) places new junctions near this branch station, not on the spine.
+					FreightNetwork.state.lastBuiltRoute = newRoute;
 					HgLog.Info("FreightNetwork.SearchAndConnect: connected via junction "
 						+ AIIndustry.GetName(found.industry)
 						+ " -> "
