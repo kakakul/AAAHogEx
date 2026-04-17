@@ -94,7 +94,8 @@ class FreightNetwork {
 				srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
 				primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 0,
 				perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 0,
-				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0
+				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
+				triedIndustries = {}
 			});
 		}
 		FreightNetwork.state.destPlace = null;
@@ -342,7 +343,8 @@ class FreightNetwork {
 					srcIndustry = srcIndustry,
 					primaryRadius = 0,
 					perpOutRadius = 0,
-					perpInRadius = 0
+					perpInRadius = 0,
+					triedIndustries = {}
 				});
 				recordedCount++;
 			} else {
@@ -370,7 +372,8 @@ class FreightNetwork {
 					srcIndustry = srcIndustry,
 					primaryRadius = 0,
 					perpOutRadius = 0,
-					perpInRadius = 0
+					perpInRadius = 0,
+					triedIndustries = {}
 				});
 				recordedCount++;
 			} else {
@@ -437,8 +440,8 @@ class FreightNetwork {
 				local perpInSign = -perpOutSign;
 
 				junc.primaryRadius += 10;
-				junc.perpOutRadius += 2;
-				junc.perpInRadius  += 1;
+				junc.perpOutRadius += 6;
+				junc.perpInRadius  += 0;
 
 				local pFarX = AIMap.GetTileX(mergeTile) + pDir.dx * junc.primaryRadius;
 				local pFarY = AIMap.GetTileY(mergeTile) + pDir.dy * junc.primaryRadius;
@@ -478,6 +481,7 @@ class FreightNetwork {
 				local found = null;
 				foreach(indId, _ in allIndustries) {
 					if(FreightNetwork.servedSources.rawin(indId)) continue;
+					if(junc.triedIndustries.rawin(indId)) continue;
 					local indLoc = AIIndustry.GetLocation(indId);
 					local ix = AIMap.GetTileX(indLoc);
 					local iy = AIMap.GetTileY(indLoc);
@@ -584,6 +588,7 @@ class FreightNetwork {
 					if(!builder1.Build()) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: outbound spur build failed");
 						srcHgStation.Remove();
+						junc.triedIndustries.rawset(found.industry, true);
 						ji++;
 						continue;
 					}
@@ -616,6 +621,7 @@ class FreightNetwork {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: return spur build failed");
 						builtPath1.Remove();
 						srcHgStation.Remove();
+						junc.triedIndustries.rawset(found.industry, true);
 						ji++;
 						continue;
 					}
