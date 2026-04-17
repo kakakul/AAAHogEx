@@ -3022,7 +3022,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		local useSimpleStation = !(dest instanceof Place);
 		local destHgStation = GetBuilt("destHgStation");
 		if(destHgStation == null) {
-			local destStationFactory = TerminalStationFactory();
+			local destStationFactory = HogeAI.Get().IsNetworkMode() ? DestRailStationFactory() : TerminalStationFactory();
 			destStationFactory.distance = idealDistance;
 			destStationFactory.useSingle = useSingle;
 			destStationFactory.useSimple = useSimpleStation;

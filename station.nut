@@ -1612,12 +1612,16 @@ class SrcRailStationFactory extends RailStationFactory {
 
 class DestRailStationFactory extends RailStationFactory {
 	platformNum = null;
-	
+	useSingle = null;
+	useSimple = null;
+
 	constructor(platformNum=3) {
 		RailStationFactory.constructor();
 		this.platformNum = platformNum;
+		this.useSingle = false;
+		this.useSimple = false;
 	}
-	
+
 	function GetPlatformNum() {
 		return platformNum;
 	}
@@ -1625,7 +1629,7 @@ class DestRailStationFactory extends RailStationFactory {
 		return platformLength;
 	}
 	function Create(platformTile,stationDirection) {
-		return DestRailStation(platformTile, platformNum, GetPlatformLength(), stationDirection);
+		return SmartStation(platformTile, platformNum, GetPlatformLength(), stationDirection);
 	}
 	function GetTypeName() {
 		return "DestRailStationFactory";
