@@ -430,13 +430,14 @@ class FreightNetwork {
 				local pDir = FreightNetwork.GetPrimaryDirection(destTile, mergeTile);
 				local perpDx = pDir.dy;
 				local perpDy = -pDir.dx;
-				local srcTile = (junc.srcIndustry != -1)
-					? AIIndustry.GetLocation(junc.srcIndustry)
-					: mergeTile;
-				local srcPerpOffset =
-					(AIMap.GetTileX(srcTile) - AIMap.GetTileX(mergeTile)) * perpDx
-					+ (AIMap.GetTileY(srcTile) - AIMap.GetTileY(mergeTile)) * perpDy;
-				local perpOutSign = (srcPerpOffset >= 0) ? -1 : 1;
+				// Outward = direction from spine toward arm tip.
+				// leg1Path[0] = arm outer tip (mergeTile), leg1Path[last] = spine tile.
+				local leg1 = junc.leg1Path;
+				local spineTile = leg1[leg1.len() - 1];
+				local armPerpOffset =
+					(AIMap.GetTileX(mergeTile) - AIMap.GetTileX(spineTile)) * perpDx
+					+ (AIMap.GetTileY(mergeTile) - AIMap.GetTileY(spineTile)) * perpDy;
+				local perpOutSign = (armPerpOffset >= 0) ? 1 : -1;
 				local perpInSign = -perpOutSign;
 
 				junc.primaryRadius += 10;
