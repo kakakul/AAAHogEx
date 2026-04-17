@@ -50,8 +50,9 @@ class FreightNetwork {
 		local junctions = [];
 		foreach(j in FreightNetwork.availableJunctions) {
 			junctions.push({
-				leftTile = j.leftTile,
-				rightTile = j.rightTile,
+				mergeTile = j.mergeTile,
+				leg1Path = j.leg1Path,
+				leg2Path = j.leg2Path,
 				srcIndustry = j.srcIndustry,
 				primaryRadius = j.primaryRadius,
 				perpOutRadius = j.perpOutRadius,
@@ -81,10 +82,16 @@ class FreightNetwork {
 		if(fn.rawin("failedPairs")) foreach(k, v in fn.failedPairs) FreightNetwork.failedPairs.rawset(k, v);
 		FreightNetwork.availableJunctions.clear();
 		foreach(j in fn.availableJunctions) {
+			if(!j.rawin("mergeTile") || j.mergeTile == -1) continue;
+			// leg1Path/leg2Path are essential for connection; skip entries missing them
+			// (they cannot be recovered without the original route's path data).
+			if(!j.rawin("leg1Path") || j.leg1Path == null) continue;
+			if(!j.rawin("leg2Path") || j.leg2Path == null) continue;
 			FreightNetwork.availableJunctions.push({
-				leftTile = j.leftTile,
-				rightTile = j.rightTile,
-				srcIndustry = j.srcIndustry,
+				mergeTile = j.mergeTile,
+				leg1Path = j.leg1Path,
+				leg2Path = j.leg2Path,
+				srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
 				primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 0,
 				perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 0,
 				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0
@@ -306,21 +313,74 @@ class FreightNetwork {
 			? (route.srcHgStation.place instanceof HgIndustry ? route.srcHgStation.place.industry : -1)
 			: -1;
 
-		if(result.leftTile != -1 || result.rightTile != -1) {
-			FreightNetwork.availableJunctions.push({
-				leftTile = result.leftTile,
-				rightTile = result.rightTile,
-				leftPath = result.leftPath,
-				rightPath = result.rightPath,
-				leftInboundPath = result.leftInboundPath,
-				rightInboundPath = result.rightInboundPath,
-				srcIndustry = srcIndustry,
-				primaryRadius = 0,
-				perpOutRadius = 0,
-				perpInRadius = 0
-			});
-			HgLog.Info("FreightNetwork.BuildJunctions: recorded junctions leftTile="
-				+ result.leftTile + " rightTile=" + result.rightTile
+		// Determine leg1/leg2 now, while we have the route's pathSrcToDest available.
+		// leg1Path deepest tile must be on pathSrcToDest (spine forward track, spur→dest).
+		// leg2Path is the other arm (dest→spur, return track).
+		// This avoids re-checking against lastBuiltRoute in SearchAndConnect, which may
+		// have changed to a branch route by the time those junctions are consumed.
+		local srcToDestSet = {};
+		foreach(t in arr1) srcToDestSet.rawset(t, true);
+
+		local recordedCount = 0;
+		if(result.leftTile != -1) {
+			local ap = result.leftPath;
+			local ip = result.leftInboundPath;
+			local legs = null;
+			if(ap != null && ip != null) {
+				local deepestInbound = ip[ip.len() - 1];
+				local deepestArm = ap[ap.len() - 1];
+				if(srcToDestSet.rawin(deepestInbound))
+					legs = {leg1Path = ip, leg2Path = ap};
+				else if(srcToDestSet.rawin(deepestArm))
+					legs = {leg1Path = ap, leg2Path = ip};
+			}
+			if(legs != null) {
+				FreightNetwork.availableJunctions.push({
+					mergeTile = result.leftTile,
+					leg1Path = legs.leg1Path,
+					leg2Path = legs.leg2Path,
+					srcIndustry = srcIndustry,
+					primaryRadius = 0,
+					perpOutRadius = 0,
+					perpInRadius = 0
+				});
+				recordedCount++;
+			} else {
+				HgLog.Warning("FreightNetwork.BuildJunctions: cannot resolve legs for leftTile="
+					+ result.leftTile + ", skipping");
+			}
+		}
+		if(result.rightTile != -1) {
+			local ap = result.rightPath;
+			local ip = result.rightInboundPath;
+			local legs = null;
+			if(ap != null && ip != null) {
+				local deepestInbound = ip[ip.len() - 1];
+				local deepestArm = ap[ap.len() - 1];
+				if(srcToDestSet.rawin(deepestInbound))
+					legs = {leg1Path = ip, leg2Path = ap};
+				else if(srcToDestSet.rawin(deepestArm))
+					legs = {leg1Path = ap, leg2Path = ip};
+			}
+			if(legs != null) {
+				FreightNetwork.availableJunctions.push({
+					mergeTile = result.rightTile,
+					leg1Path = legs.leg1Path,
+					leg2Path = legs.leg2Path,
+					srcIndustry = srcIndustry,
+					primaryRadius = 0,
+					perpOutRadius = 0,
+					perpInRadius = 0
+				});
+				recordedCount++;
+			} else {
+				HgLog.Warning("FreightNetwork.BuildJunctions: cannot resolve legs for rightTile="
+					+ result.rightTile + ", skipping");
+			}
+		}
+		if(recordedCount > 0) {
+			HgLog.Info("FreightNetwork.BuildJunctions: recorded junctions count=" + recordedCount
+				+ " leftTile=" + result.leftTile + " rightTile=" + result.rightTile
 				+ " srcIndustry=" + srcIndustry);
 		} else {
 			HgLog.Warning("FreightNetwork.BuildJunctions: no junctions built near source");
@@ -358,7 +418,7 @@ class FreightNetwork {
 			local anyActive = false;
 			while(ji < FreightNetwork.availableJunctions.len()) {
 				local junc = FreightNetwork.availableJunctions[ji];
-				local mergeTile = (junc.leftTile != -1) ? junc.leftTile : junc.rightTile;
+				local mergeTile = junc.mergeTile;
 				if(mergeTile == -1) {
 					FreightNetwork.availableJunctions.remove(ji);
 					continue;
@@ -474,47 +534,17 @@ class FreightNetwork {
 						continue;
 					}
 
-					// Determine which junction arm connects to which spine direction.
-					// Each RightDivergeJunction has two arms:
-					//   inbound arm (At(2,2) end): spur trains MERGE INTO spine → for leg 1 (spur→dest)
-					//   outbound arm (At(3,1) end): spine trains DIVERGE to spur → for leg 2 (return)
-					// The inbound arm's deepest tile (At(0,-1)) is on one of the two spine paths.
-					// If it's on pathSrcToDest, that junction handles leg1=inbound, leg2=outbound.
-					// Otherwise use the other junction (leftJ vs rightJ are on opposite spine sides).
-					local srcToDestSet = {};
-					foreach(t in spineRoute.pathSrcToDest.array_) srcToDestSet.rawset(t, true);
-
-					local leg1Tiles = null; // inbound arm → leg 1 (spur→dest)
-					local leg2Tiles = null; // outbound arm → leg 2 (dest→spur)
-
-					if(junc.leftInboundPath != null && junc.leftPath != null) {
-						local deepest = junc.leftInboundPath[junc.leftInboundPath.len() - 1];
-						if(srcToDestSet.rawin(deepest)) {
-							leg1Tiles = junc.leftInboundPath;
-							leg2Tiles = junc.leftPath;
-						}
-					}
-					if(leg1Tiles == null && junc.rightInboundPath != null && junc.rightPath != null) {
-						local deepest = junc.rightInboundPath[junc.rightInboundPath.len() - 1];
-						if(srcToDestSet.rawin(deepest)) {
-							leg1Tiles = junc.rightInboundPath;
-							leg2Tiles = junc.rightPath;
-						}
-					}
-					if(leg1Tiles == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: cannot determine junction direction, skipping");
-						srcHgStation.Remove();
-						FreightNetwork.availableJunctions.remove(ji);
-						continue;
-					}
+					// leg1Path/leg2Path were resolved at junction build time (BuildJunctions)
+					// against the route that was active then — no runtime spine lookup needed.
+					// leg1Path: spur→dest (arm tip toward spine fwd track)
+					// leg2Path: dest→spur (arm tip toward spine return track)
+					local leg1Tiles = junc.leg1Path;
+					local leg2Tiles = junc.leg2Path;
 
 					// Arm paths are stored outermost-first: leg1Tiles[0] = arm outer tip.
 					// We pass the arm-tip start tuple directly to Initialize, bypassing
 					// PathToStation's GetStartArray so the pathfinder starts exactly at
 					// the arm outer tip heading away from the junction, not at a spine tile.
-					//
-					// Leg 1 (inbound arm): cur=leg1Tiles[0]=At(2,2), came from leg1Tiles[1]=At(2,1)
-					// Leg 2 (outbound arm): cur=leg2Tiles[0]=At(3,1), came from leg2Tiles[1]=At(2,1)
 					local arm1Start = [[leg1Tiles[0], leg1Tiles[1], leg1Tiles[2], leg1Tiles[3]]];
 					local arm2Start = [[leg2Tiles[0], leg2Tiles[1], leg2Tiles[2], leg2Tiles[3]]];
 
