@@ -130,6 +130,14 @@ class FreightNetwork {
 		}
 	}
 
+	function FreightNetwork::IsIndustryInTown(indId) {
+		local indLoc = AIIndustry.GetLocation(indId);
+		foreach(townId, _ in AITownList()) {
+			if(AITile.IsWithinTownInfluence(indLoc, townId)) return true;
+		}
+		return false;
+	}
+
 	function FreightNetwork::FindSpine() {
 		local ai = HogeAI.Get();
 		local mapW = AIMap.GetMapSizeX();
@@ -187,6 +195,7 @@ class FreightNetwork {
 					foreach(src in cargoProducers[cargo]) {
 						if(src.id == destId) continue;
 						if(FreightNetwork.failedPairs.rawin(src.id + "-" + destId)) continue;
+						if(FreightNetwork.IsIndustryInTown(src.id) && FreightNetwork.IsIndustryInTown(destId)) continue;
 						local dist = AIMap.DistanceManhattan(src.loc, destLoc);
 						if(dist < 30 || dist >= maxRouteDist) continue;
 
@@ -341,8 +350,8 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
-					primaryRadius = 0,
-					perpOutRadius = 0,
+					primaryRadius = 10,
+					perpOutRadius = 6,
 					perpInRadius = 0,
 					triedIndustries = {}
 				});
@@ -370,8 +379,8 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
-					primaryRadius = 0,
-					perpOutRadius = 0,
+					primaryRadius = 10,
+					perpOutRadius = 6,
 					perpInRadius = 0,
 					triedIndustries = {}
 				});
