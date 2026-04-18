@@ -410,18 +410,18 @@ class RailPathFinder
 		}
 
 		// Build wrong-side BFS (raw distances, no offset yet)
-		local _wrongBFS = {};
+		local wrongBFS = {};
 		foreach(t, _ in wrongSide) {
-			_wrongBFS.rawset(t, 0);
+			wrongBFS.rawset(t, 0);
 		}
 		local wrongFrontier = wrongSide;
 		for(local i=1; i<20; i++) {
 			local next = {};
 			foreach(t, _ in wrongFrontier) {
 				foreach(d in HgTile.DIR4Index) {
-					if(!_wrongBFS.rawin(t+d)) {
+					if(!wrongBFS.rawin(t+d)) {
 						next.rawset(t+d, i);
-						_wrongBFS.rawset(t+d, i);
+						wrongBFS.rawset(t+d, i);
 					}
 				}
 			}
@@ -430,7 +430,7 @@ class RailPathFinder
 
 		// Penalise wrong-side tiles: if wrong BFS reached this tile closer than
 		// correct BFS, the tile is on the wrong side — raise its level by 3.
-		foreach(t, wrongDist in _wrongBFS) {
+		foreach(t, wrongDist in wrongBFS) {
 			if(_reverseNears.rawin(t)) {
 				if(wrongDist < _reverseNears[t]) {
 					_reverseNears[t] = _reverseNears[t] + 3;
