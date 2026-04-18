@@ -646,6 +646,8 @@ class FreightNetwork {
 					newRoute.destDepot = spineRoute.destDepot;
 					newRoute.Initialize();
 					newRoute.CalculateUseDepots();
+					TrainRoute.instances.push(newRoute);
+					PlaceDictionary.Get().AddRoute(newRoute);
 
 					// Deploy initial train; skip DoPostBuild to avoid uncontrolled extensions
 					if(!newRoute.BuildFirstTrain()) {
