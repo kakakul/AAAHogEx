@@ -519,6 +519,28 @@ class FreightNetwork {
 						continue;
 					}
 
+					// Estimate train cost in test mode; defer if too expensive for current income
+					local estimatedTrainCost = 0;
+					{
+						local testMode = AITestMode();
+						local accounting = AIAccounting();
+						local tempDepot = spineRoute.srcDepot;
+						for(local i = 0; i < engineSet.numLoco; i++) {
+							AIVehicle.BuildVehicleWithRefit(tempDepot, engineSet.trainEngine, found.cargo);
+						}
+						foreach(wi in engineSet.wagonEngineInfos) {
+							for(local i = 0; i < wi.numWagon; i++) {
+								AIVehicle.BuildVehicleWithRefit(tempDepot, wi.engine, wi.cargo);
+							}
+						}
+						estimatedTrainCost = accounting.GetCosts();
+					}
+					if(HogeAI.Get().IsTooExpensive(estimatedTrainCost)) {
+						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (train cost " + estimatedTrainCost + " too expensive)");
+						ji++;
+						continue;
+					}
+
 					// Build src station
 					local srcPlace = HgIndustry(found.industry, true);
 					local destTile2 = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
