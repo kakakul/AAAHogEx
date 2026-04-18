@@ -440,12 +440,8 @@ class FreightNetwork {
 				local perpOutSign = (armPerpOffset >= 0) ? 1 : -1;
 				local perpInSign = -perpOutSign;
 
-				junc.primaryRadius += 10;
-				junc.perpOutRadius += 6;
-				junc.perpInRadius  += 0;
-
-				local pFarX = AIMap.GetTileX(mergeTile) + pDir.dx * junc.primaryRadius;
-				local pFarY = AIMap.GetTileY(mergeTile) + pDir.dy * junc.primaryRadius;
+				local pFarX = AIMap.GetTileX(mergeTile) + pDir.dx * (junc.primaryRadius + 10);
+				local pFarY = AIMap.GetTileY(mergeTile) + pDir.dy * (junc.primaryRadius + 10);
 				if(pFarX < 1 || pFarX >= mapW - 1 || pFarY < 1 || pFarY >= mapH - 1) {
 					HgLog.Info("FreightNetwork.SearchAndConnect: junction exhausted at "
 						+ HgTile(mergeTile));
@@ -519,26 +515,20 @@ class FreightNetwork {
 						continue;
 					}
 
-					// Estimate train cost in test mode; defer if too expensive for current income
-					local estimatedTrainCost = 0;
-					{
-						local testMode = AITestMode();
-						local accounting = AIAccounting();
-						local tempDepot = spineRoute.srcDepot;
-						for(local i = 0; i < engineSet.numLoco; i++) {
-							AIVehicle.BuildVehicleWithRefit(tempDepot, engineSet.trainEngine, found.cargo);
-						}
-						foreach(wi in engineSet.wagonEngineInfos) {
-							for(local i = 0; i < wi.numWagon; i++) {
-								AIVehicle.BuildVehicleWithRefit(tempDepot, wi.engine, wi.cargo);
-							}
-						}
-						estimatedTrainCost = accounting.GetCosts();
-					}
-					if(HogeAI.Get().IsTooExpensive(estimatedTrainCost)) {
-						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (train cost " + estimatedTrainCost + " too expensive)");
-						ji++;
-						continue;
+					// BuildFirstTrain deploys 2 trains (engine + clone) for non-single routes.
+					// Add estimated track cost for the spur (both directions, matching Estimator.GetBuildingCost for VT_RAIL).
+					local branchDist = AIMap.DistanceManhattan(found.tile, mergeTile);
+					local demolishFarm = HogeAI.GetInflatedMoney(540) * 40 / 100;
+					local trackCostPerTile = AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 2 + demolishFarm;
+					local estimatedTrackCost = trackCostPerTile * 2 * branchDist
+						+ AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 220;
+					local estimatedCost = engineSet.price * 2 + estimatedTrackCost;
+					if(HogeAI.Get().IsTooExpensive(estimatedCost)) {
+						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (cost " + estimatedCost + " too expensive)");
+						local deferred = FreightNetwork.availableJunctions[ji];
+						FreightNetwork.availableJunctions.remove(ji);
+						FreightNetwork.availableJunctions.push(deferred);
+						return false;
 					}
 
 					// Build src station
@@ -688,6 +678,9 @@ class FreightNetwork {
 					return true;
 				}
 
+				// No source found — expand search radius for next round
+				junc.primaryRadius += 10;
+				junc.perpOutRadius += 6;
 				HgLog.Info("FreightNetwork.SearchAndConnect: no source in rectangle"
 					+ " junc=" + HgTile(mergeTile)
 					+ " primaryRadius=" + junc.primaryRadius);
