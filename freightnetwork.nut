@@ -538,8 +538,8 @@ class FreightNetwork {
 					srcStationFactory.platformLength = spineRoute.GetPlatformLength();
 					local srcHgStation = srcStationFactory.CreateBest(srcPlace, found.cargo, destTile2);
 					if(srcHgStation == null) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: failed to build src station, blacklisting");
-						FreightNetwork.servedSources.rawset(found.industry, true);
+						HgLog.Warning("FreightNetwork.SearchAndConnect: failed to build src station, skipping for this junction");
+						junc.triedIndustries.rawset(found.industry, true);
 						ji++;
 						continue;
 					}
