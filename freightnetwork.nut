@@ -305,7 +305,7 @@ class FreightNetwork {
 							AIVehicle.VT_RAIL, cargo, dist, production, false, infraTypes);
 						if(estimate == null || estimate.value <= 0) continue;
 
-						local score = estimate.value * 1000 / (minEdgeDist + 1);
+						local score = estimate.value * 1000 / (minEdgeDist + 100);
 						if(score > bestScore) {
 							bestScore = score;
 							bestCandidate = {
@@ -623,6 +623,9 @@ class FreightNetwork {
 					local estimatedTrackCost = trackCostPerTile * 2 * branchDist
 						+ AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 220;
 					local estimatedCost = engineSet.price * 2 + estimatedTrackCost;
+					HgLog.Info("FreightNetwork cost check: estimatedCost=" + estimatedCost
+						+ " usableMoney=" + HogeAI.GetUsableMoney()
+						+ " quarterlyIncome=" + HogeAI.GetQuarterlyIncome(4));
 					if(HogeAI.Get().IsTooExpensive(estimatedCost)) {
 						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (cost " + estimatedCost + " too expensive)");
 						local deferred = FreightNetwork.availableJunctions[ji];
@@ -630,6 +633,10 @@ class FreightNetwork {
 						FreightNetwork.availableJunctions.push(deferred);
 						return false;
 					}
+
+					// Match rail type of spine so branch uses electrified/monorail/maglev correctly
+					local savedRailType = AIRail.GetCurrentRailType();
+					AIRail.SetCurrentRailType(engineSet.railType);
 
 					// Build src station
 					local srcPlace = HgIndustry(found.industry, true);
@@ -640,6 +647,7 @@ class FreightNetwork {
 					if(srcHgStation == null) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: failed to build src station, skipping for this junction");
 						junc.triedIndustries.rawset(found.industry, true);
+						AIRail.SetCurrentRailType(savedRailType);
 						ji++;
 						continue;
 					}
@@ -647,6 +655,7 @@ class FreightNetwork {
 					srcHgStation.isSourceStation = true;
 					if(!srcHgStation.BuildExec()) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: srcHgStation.BuildExec failed");
+						AIRail.SetCurrentRailType(savedRailType);
 						ji++;
 						continue;
 					}
@@ -702,6 +711,7 @@ class FreightNetwork {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: outbound spur build failed");
 						srcHgStation.Remove();
 						junc.triedIndustries.rawset(found.industry, true);
+						AIRail.SetCurrentRailType(savedRailType);
 						ji++;
 						continue;
 					}
@@ -735,6 +745,7 @@ class FreightNetwork {
 						builtPath1.Remove();
 						srcHgStation.Remove();
 						junc.triedIndustries.rawset(found.industry, true);
+						AIRail.SetCurrentRailType(savedRailType);
 						ji++;
 						continue;
 					}
@@ -772,6 +783,7 @@ class FreightNetwork {
 					// Update lastBuiltRoute so BuildJunctions (called from Step after we
 					// return) places new junctions near this branch station, not on the spine.
 					FreightNetwork.state.lastBuiltRoute = newRoute;
+					AIRail.SetCurrentRailType(savedRailType);
 					HgLog.Info("FreightNetwork.SearchAndConnect: connected via junction "
 						+ AIIndustry.GetName(found.industry)
 						+ " -> "
