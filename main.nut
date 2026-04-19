@@ -4052,6 +4052,7 @@ class HogeAI extends AIController {
 		}
 		list.Sort(AIList.SORT_BY_VALUE,true);
 		foreach(index,_ in list) {
+			routes[index].CheckClose();
 			routes[index].CheckBuildVehicle();
 			routes[index].CheckRenewal();
 		}
