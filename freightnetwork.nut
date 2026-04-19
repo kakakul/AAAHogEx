@@ -617,14 +617,18 @@ class FreightNetwork {
 
 					// BuildFirstTrain deploys 2 trains (engine + clone) for non-single routes.
 					// Add estimated track cost for the spur (both directions, matching Estimator.GetBuildingCost for VT_RAIL).
+					// Modified formula as GetBuildingCost estimation is very high.
 					local branchDist = AIMap.DistanceManhattan(found.tile, mergeTile);
-					local demolishFarm = HogeAI.GetInflatedMoney(540) * 40 / 100;
-					local trackCostPerTile = AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 2 + demolishFarm;
+					local demolishFarm = HogeAI.GetInflatedMoney(540) * 25 / 100;
+					local trackCostPerTile = AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) + demolishFarm;
 					local estimatedTrackCost = trackCostPerTile * 2 * branchDist
-						+ AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 220;
+						+ AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 120;
 					local estimatedCost = engineSet.price * 2 + estimatedTrackCost;
 					HgLog.Info("FreightNetwork cost check: estimatedCost=" + estimatedCost
 						+ " usableMoney=" + HogeAI.GetUsableMoney()
+						+ " bankBalance=" + AICompany.GetBankBalance(AICompany.COMPANY_SELF)
+						+ " maxLoan=" + AICompany.GetMaxLoanAmount()
+						+ " currentLoan=" + AICompany.GetLoanAmount()
 						+ " quarterlyIncome=" + HogeAI.GetQuarterlyIncome(4));
 					if(HogeAI.Get().IsTooExpensive(estimatedCost)) {
 						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (cost " + estimatedCost + " too expensive)");
