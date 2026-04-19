@@ -442,7 +442,7 @@ class FreightNetwork {
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
 					primaryRadius = 10,
-					perpOutRadius = 6,
+					perpOutRadius = 5,
 					perpInRadius = 0,
 					triedIndustries = {}
 				});
@@ -471,7 +471,7 @@ class FreightNetwork {
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
 					primaryRadius = 10,
-					perpOutRadius = 6,
+					perpOutRadius = 5,
 					perpInRadius = 0,
 					triedIndustries = {}
 				});
@@ -593,6 +593,10 @@ class FreightNetwork {
 					}
 					if(matchCargo == -1) continue;
 					if(AIMap.DistanceManhattan(indLoc, mergeTile) < 30) continue;
+					// Reject industries not in the same direction to the destination
+					local toMerge = FreightNetwork.GetPrimaryDirection(indLoc, mergeTile);
+					local toDest = FreightNetwork.GetPrimaryDirection(mergeTile, destTile);
+					if(toMerge.dx != toDest.dx || toMerge.dy != toDest.dy) continue;
 					found = {industry = indId, tile = indLoc, cargo = matchCargo};
 					break;
 				}
@@ -797,7 +801,7 @@ class FreightNetwork {
 
 				// No source found — expand search radius for next round
 				junc.primaryRadius += 10;
-				junc.perpOutRadius += 6;
+				junc.perpOutRadius += 5;
 				HgLog.Info("FreightNetwork.SearchAndConnect: no source in rectangle"
 					+ " junc=" + HgTile(mergeTile)
 					+ " primaryRadius=" + junc.primaryRadius);
