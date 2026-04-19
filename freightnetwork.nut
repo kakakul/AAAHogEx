@@ -276,9 +276,9 @@ class FreightNetwork {
 				if(minEdgeDist > edgeThresh) continue;
 
 				local destType = AIIndustry.GetIndustryType(destId);
-				local infraTypes = AIIndustryType.GetAcceptedCargo(destType);
-				if(infraTypes == null) continue;
-				foreach(cargo, _ in infraTypes) {
+				local acceptedCargos = AIIndustryType.GetAcceptedCargo(destType);
+				if(acceptedCargos == null) continue;
+				foreach(cargo, _ in acceptedCargos) {
 					if(CargoUtils.IsPaxOrMail(cargo)) continue;
 					if(!cargoProducers.rawin(cargo)) continue;
 
@@ -368,6 +368,7 @@ class FreightNetwork {
 				FreightNetwork.servedDests.rawset(bestCandidate.destId, true);
 				FreightNetwork.servedSources.rawset(bestCandidate.srcId, true);
 				FreightNetwork.state.lastBuiltRoute = newRoutes[0];
+				FreightNetwork.ScanFeeders(newRoutes[0]);
 				HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
 				return true;
 			}

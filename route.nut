@@ -3647,6 +3647,7 @@ class RouteBuilder extends Construction {
 	}
 
 	function _DoPostBuild(builtRoute) {
+		if(HogeAI.Get().IsNetworkMode()) return;
 		local engineSet = builtRoute.GetLatestEngineSet();
 		if( engineSet == null ) {
 			HgLog.Info("engineSet == null "+builtRoute);
