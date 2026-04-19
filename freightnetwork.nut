@@ -182,136 +182,49 @@ class FreightNetwork {
 		while(FreightNetwork.pendingFeeders.len() > 0) {
 			local feeder = FreightNetwork.pendingFeeders[0];
 
-			// Drop if industry closed
+			// Drop if industry closed or already served
 			if(!AIIndustry.IsValidIndustry(feeder.srcIndustry)) {
 				FreightNetwork.pendingFeeders.remove(0);
 				continue;
 			}
-			// Drop if already served
 			if(FreightNetwork.servedSources.rawin(feeder.srcIndustry)) {
 				FreightNetwork.pendingFeeders.remove(0);
 				continue;
 			}
 
-			local cargo = feeder.cargo;
-			local srcLoc = AIIndustry.GetLocation(feeder.srcIndustry);
-			local branchTile = feeder.branchStationTile;
-
-			// Find a suitable truck engine for this cargo
-			local engineSet = RoadRoute.EstimateEngineSet(RoadRoute, cargo,
-				AIMap.DistanceManhattan(srcLoc, branchTile), 50, false, null, false);
-			if(engineSet == null) {
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: no truck engine for "
-					+ AICargo.GetName(cargo) + ", deferring");
-				return;
-			}
-
-			local engine = engineSet.engine;
-			local roadType = engineSet.infrastractureType;
-			local savedRoadType = AIRoad.GetCurrentRoadType();
-			AIRoad.SetCurrentRoadType(roadType);
-
-			// Build truck stop near source industry
-			local srcPlace = HgIndustry(feeder.srcIndustry, true); // true = producing, for cargo tile search
-			local srcStationFactory = RoadStationFactory(cargo, true);
-			local srcHgStation = srcStationFactory.CreateBest(srcPlace, cargo, branchTile);
-			if(srcHgStation == null) {
-				// No valid tile found — permanent placement failure, blacklist
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: no tile for truck stop near "
-					+ AIIndustry.GetName(feeder.srcIndustry) + ", blacklisting");
+			// Drop if branch route gone
+			local branchRoute = Route.allRoutes.rawin(feeder.branchRouteId) ? Route.allRoutes[feeder.branchRouteId] : null;
+			if(branchRoute == null || branchRoute.IsRemoved()) {
 				FreightNetwork.pendingFeeders.remove(0);
 				continue;
 			}
-			srcHgStation.place = srcPlace;
-			local srcBuilt = srcHgStation.BuildExec();
-			if(!srcBuilt) {
-				// BuildExec failed — likely a money issue, defer
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: BuildExec failed near "
-					+ AIIndustry.GetName(feeder.srcIndustry) + ", deferring");
-				return;
-			}
 
-			// Build truck stop joined to branch station
+			// Resolve branch station group as transfer destination
+			local branchTile = feeder.branchStationTile;
 			local destSg = HgStation.tileStation.rawin(branchTile)
 				? HgStation.worldInstances[HgStation.tileStation[branchTile]].stationGroup
 				: null;
 			if(destSg == null) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
 				HgLog.Warning("FreightNetwork.TryBuildFeeder: cannot find branch station group, deferring");
 				return;
 			}
-			local destStationFactory = RoadStationFactory(cargo, true);
-			local destHgStation = destStationFactory.CreateBest(destSg, cargo, srcLoc);
-			if(destHgStation == null) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: no tile for truck stop near branch station, blacklisting");
+
+			// dest=StationGroup makes IsTransfer() return true in the builder
+			local src = HgIndustry(feeder.srcIndustry, true);
+			local builder = RoadRouteBuilder(destSg, src, feeder.cargo, {});
+			local route = builder.Build();
+			if(route != null) {
+				FreightNetwork.servedSources.rawset(feeder.srcIndustry, true);
 				FreightNetwork.pendingFeeders.remove(0);
-				continue;
-			}
-			local destBuilt = destHgStation.BuildExec();
-			if(!destBuilt) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: BuildExec failed near branch station, deferring");
-				return;
-			}
-
-			// Build road path between the two stops
-			local roadBuilder = RoadBuilder(engine, cargo);
-			roadBuilder.pathFindLimit = 50;
-			local pathOk = roadBuilder.BuildPath(
-				[srcHgStation.platformTile], [destHgStation.platformTile], true);
-
-			if(!pathOk) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: no road path "
-					+ HgTile(srcHgStation.platformTile)
-					+ " -> " + HgTile(destHgStation.platformTile) + ", blacklisting");
+				HgLog.Info("FreightNetwork.TryBuildFeeder: built feeder "
+					+ AIIndustry.GetName(feeder.srcIndustry) + " -> " + destSg.GetName());
+			} else {
+				// Builder failed and registered NgPlace internally — blacklist this entry
+				HgLog.Warning("FreightNetwork.TryBuildFeeder: builder failed for "
+					+ AIIndustry.GetName(feeder.srcIndustry) + ", blacklisting");
 				FreightNetwork.pendingFeeders.remove(0);
-				continue;
 			}
-
-			// Build depot near source
-			local depot = RoadRoute.BuildDepotNear(srcLoc);
-			if(depot == null) depot = RoadRoute.BuildDepotNear(destHgStation.platformTile);
-			if(depot == null) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: cannot build depot, blacklisting");
-				FreightNetwork.pendingFeeders.remove(0);
-				continue;
-			}
-
-			// Wire up the road route with transfer orders
-			local roadRoute = RoadRoute();
-			roadRoute.cargo = cargo;
-			roadRoute.srcHgStation = srcHgStation;
-			roadRoute.destHgStation = destHgStation;
-			roadRoute.isTransfer = true;
-			roadRoute.isBiDirectional = false;
-			roadRoute.depot = depot;
-			roadRoute.useDepotOrder = false;
-			roadRoute.useServiceOrder = true;
-			roadRoute.Initialize(); // sets roadType from AIRoad.GetCurrentRoadType()
-			roadRoute.SetPath(roadBuilder.path);
-
-			local vehicle = roadRoute.BuildVehicleFirst();
-			if(vehicle == null) {
-				AIRoad.SetCurrentRoadType(savedRoadType);
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: BuildVehicleFirst failed, deferring");
-				return;
-			}
-
-			roadRoute.UpdateSavedData();
-			RoadRoute.instances.push(roadRoute);
-			PlaceDictionary.Get().AddRoute(roadRoute);
-			FreightNetwork.servedSources.rawset(feeder.srcIndustry, true);
-			FreightNetwork.pendingFeeders.remove(0);
-			AIRoad.SetCurrentRoadType(savedRoadType);
-			HgLog.Info("FreightNetwork.TryBuildFeeder: built feeder "
-				+ AIIndustry.GetName(feeder.srcIndustry)
-				+ " -> " + destHgStation.GetName());
-			return;
+			return; // one attempt per Step()
 		}
 	}
 
