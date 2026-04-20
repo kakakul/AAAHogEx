@@ -3682,131 +3682,242 @@ class FourWayJunction {
 			if(AIMap.GetTileY(m4) != AIMap.GetTileY(m3)) isEW = false;
 			if(AIMap.GetTileX(m4) - AIMap.GetTileX(m3) != dx) isEW = false;
 
-			if(!isNS && !isEW) continue;
+			// --- Try diagonal window ---
+			local diagWindow = FourWayJunction._CheckDiagonalWindow(mainTiles, p2Set, i);
 
-			// Determine perpendicular offset direction
-			local offX = (dx == 0) ? 1 : 0; // N-S → shift in X
-			local offY = (dy == 0) ? 1 : 0; // E-W → shift in Y
+			if(!isNS && !isEW && diagWindow == null) continue;
 
-			// All 4 must have a parallel tile at consistent offset
-			local offset = null;
-			local parallelOk = true;
+			// --- Straight junction attempt ---
+			if(isNS || isEW) {
+				// Determine perpendicular offset direction
+				local offX = (dx == 0) ? 1 : 0; // N-S → shift in X
+				local offY = (dy == 0) ? 1 : 0; // E-W → shift in Y
 
-			foreach(mt in [m0, m1, m2, m3]) {
-				local found = false;
+				// All 4 must have a parallel tile at consistent offset
+				local offset = null;
+				local parallelOk = true;
 
-				foreach(sign in [-1, 1]) {
-					local candidate = AIMap.GetTileIndex(
-						AIMap.GetTileX(mt) + sign * offX,
-						AIMap.GetTileY(mt) + sign * offY
-					);
+				foreach(mt in [m0, m1, m2, m3]) {
+					local found = false;
 
-					if(p2Set.rawin(candidate)) {
-						if(offset == null) offset = sign;
-						if(sign == offset) { found = true; break; }
+					foreach(sign in [-1, 1]) {
+						local candidate = AIMap.GetTileIndex(
+							AIMap.GetTileX(mt) + sign * offX,
+							AIMap.GetTileY(mt) + sign * offY
+						);
+
+						if(p2Set.rawin(candidate)) {
+							if(offset == null) offset = sign;
+							if(sign == offset) { found = true; break; }
+						}
+					}
+					if(!found) { parallelOk = false; break; }
+				}
+
+				if(parallelOk) {
+					// All 5 main tiles and their parallel counterparts must be level
+					local levelOk = true;
+					local baseHeight = AITile.GetMinHeight(m1);
+
+					foreach(mt in [mm1, m0, m1, m2, m3]) {
+						if(AITile.GetMinHeight(mt) != baseHeight) {
+							levelOk = false; break;
+						}
+
+						local par = AIMap.GetTileIndex(
+							AIMap.GetTileX(mt) + offset * offX,
+							AIMap.GetTileY(mt) + offset * offY
+						);
+
+						if(AITile.GetMinHeight(par) != baseHeight) {
+							levelOk = false; break;
+						}
+					}
+
+					if(levelOk) {
+						// Approach tiles (mm1, m0, m4 and their parallels) must have no perpendicular
+						// branch connections — a branch there would indicate another junction overlaps.
+						local noBranchOk = true;
+						foreach(mt in [mm1, m0, m4]) {
+							local par = AIMap.GetTileIndex(
+								AIMap.GetTileX(mt) + offset * offX,
+								AIMap.GetTileY(mt) + offset * offY);
+							foreach(t in [mt, par]) {
+								if(!AIRail.IsRailTile(t)) continue;
+								// A straight N-S tile should only have RAILTRACK_NW_SE set.
+								// A straight E-W tile should only have RAILTRACK_NE_SW set.
+								// Any other track bits mean there is a branch at this approach tile.
+								local tracks = AIRail.GetRailTracks(t);
+								local expectedTrack = isNS ? AIRail.RAILTRACK_NW_SE : AIRail.RAILTRACK_NE_SW;
+								if((tracks & ~expectedTrack) != 0) {
+									HgLog.Info("FourWayJunction: branch at approach tile " + HgTile(t) + " tracks=" + tracks);
+									noBranchOk = false;
+									break;
+								}
+							}
+							if(!noBranchOk) break;
+						}
+
+						if(noBranchOk) {
+							// Origin = NW corner of the switch tile pair (m1 and its parallel).
+							local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offset * offX, AIMap.GetTileY(m1) + offset * offY);
+							local origin = AIMap.GetTileIndex(
+								min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
+								min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
+
+							// dy>0: going south => station is north => rotate=false, flipY=false
+							// dy<0: going north => station is south => rotate=false, flipY=true
+							// dx>0: going west => station is east => rotate=true, flipY=false
+							// dx<0: going east => station is west => rotate=true, flipY=true
+							local rotate = (dx != 0);
+							local flipY;
+							if (!rotate) {
+								flipY = (dy < 0); // N-S case
+							} else {
+								flipY = (dx < 0); // E-W case
+							}
+							// Near a source station the junction faces the wrong way — invert flipY.
+							if (nearSrc) flipY = !flipY;
+
+							tried++;
+							HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
+								+ " flipY=" + flipY + " rotate=" + rotate);
+
+							if(rightTile == -1) {
+								local rightJ = RightDivergeJunction(origin, flipY, flipY, rotate);
+								if(rightJ.Build(true)) {
+									if(rightJ.Build(false)) {
+										HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
+											+ " flipY=" + flipY);
+										rightTile = rightJ.GetBranchEndTile();
+										rightPath = rightJ.GetBranchPath();
+										rightInboundPath = rightJ.GetInboundBranchPath();
+									}
+								} else {
+									HgLog.Info("FourWayJunction.Try: right test failed at i=" + i
+										+ " origin=" + HgTile(origin));
+								}
+							}
+
+							if(leftTile == -1) {
+								local leftJ = RightDivergeJunction(origin, flipY, !flipY, rotate);
+								if(leftJ.Build(true)) {
+									if(leftJ.Build(false)) {
+										HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
+											+ " flipY=" + flipY);
+										leftTile = leftJ.GetBranchEndTile();
+										leftPath = leftJ.GetBranchPath();
+										leftInboundPath = leftJ.GetInboundBranchPath();
+									}
+								} else {
+									HgLog.Info("FourWayJunction.Try: left test failed at i=" + i
+										+ " origin=" + HgTile(origin));
+								}
+							}
+						}
 					}
 				}
-				if(!found) { parallelOk = false; break; }
 			}
-			if(!parallelOk) continue;
 
-			// All 5 main tiles and their parallel counterparts must be level
-			local levelOk = true;
-			local baseHeight = AITile.GetMinHeight(m1);
+			// --- Diagonal junction attempt ---
+			if(diagWindow != null && (leftTile == -1 || rightTile == -1)) {
+				local origin = m1; // mainTiles[i] maps to canonical (0,0)
+				// Determine orientation candidates based on diagonal direction and parallel side
+				// diagWindow = {diagDx, diagDy, parallelOffX, parallelOffY}
+				local dDx = diagWindow.diagDx;
+				local dDy = diagWindow.diagDy;
+				local pOffX = diagWindow.parallelOffX;
+				local pOffY = diagWindow.parallelOffY;
 
-			foreach(mt in [mm1, m0, m1, m2, m3]) {
-				if(AITile.GetMinHeight(mt) != baseHeight) {
-					levelOk = false; break;
-				}
-
-				local par = AIMap.GetTileIndex(
-					AIMap.GetTileX(mt) + offset * offX,
-					AIMap.GetTileY(mt) + offset * offY
-				);
-
-				if(AITile.GetMinHeight(par) != baseHeight) {
-					levelOk = false; break;
-				}
-			}
-			if(!levelOk) continue;
-
-			// Approach tiles (mm1, m0, m4 and their parallels) must have no perpendicular
-			// branch connections — a branch there would indicate another junction overlaps.
-			local noBranchOk = true;
-			foreach(mt in [mm1, m0, m4]) {
-				local par = AIMap.GetTileIndex(
-					AIMap.GetTileX(mt) + offset * offX,
-					AIMap.GetTileY(mt) + offset * offY);
-				foreach(t in [mt, par]) {
-					if(!AIRail.IsRailTile(t)) continue;
-					// A straight N-S tile should only have RAILTRACK_NW_SE set.
-					// A straight E-W tile should only have RAILTRACK_NE_SW set.
-					// Any other track bits mean there is a branch at this approach tile.
-					local tracks = AIRail.GetRailTracks(t);
-					local expectedTrack = isNS ? AIRail.RAILTRACK_NW_SE : AIRail.RAILTRACK_NE_SW;
-					if((tracks & ~expectedTrack) != 0) {
-						HgLog.Info("FourWayJunction: branch at approach tile " + HgTile(t) + " tracks=" + tracks);
-						noBranchOk = false;
-						break;
-					}
-				}
-				if(!noBranchOk) break;
-			}
-			if(!noBranchOk) continue;
-
-			// Origin = NW corner of the switch tile pair (m1 and its parallel).
-			local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offset * offX, AIMap.GetTileY(m1) + offset * offY);
-			local origin = AIMap.GetTileIndex(
-				min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
-				min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
-
-			// dy>0: going south => station is north => rotate=false, flipY=false
-			// dy<0: going north => station is south => rotate=false, flipY=true
-			// dx>0: going west => station is east => rotate=true, flipY=false
-			// dx<0: going east => station is west => rotate=true, flipY=true
-			local rotate = (dx != 0);
-			local flipY;
-			if (!rotate) {
-				flipY = (dy < 0); // N-S case
-			} else {
-				flipY = (dx < 0); // E-W case
-			}
-			// Near a source station the junction faces the wrong way — invert flipY.
-			if (nearSrc) flipY = !flipY;
-
-			tried++;
-			HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
-				+ " flipY=" + flipY + " rotate=" + rotate);
-
-			if(rightTile == -1) {
-				local rightJ = RightDivergeJunction(origin, flipY, flipY, rotate);
-				if(rightJ.Build(true)) {
-					if(rightJ.Build(false)) {
-						HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
-							+ " flipY=" + flipY);
-						rightTile = rightJ.GetBranchEndTile();
-						rightPath = rightJ.GetBranchPath();
-						rightInboundPath = rightJ.GetInboundBranchPath();
+				// Four orientation combos to try for right and left diagonal junctions.
+				// We try all that match the diagonal direction and parallel side,
+				// using Build(true) as the authority.
+				// NE→SW diagonal: (dDx*dDy < 0) — steps like (+1,-1) or (-1,+1)
+				// NW→SE diagonal: (dDx*dDy > 0) — steps like (+1,+1) or (-1,-1)
+				local isNESW = (dDx * dDy < 0);
+				// Candidate (flipY, flipX, rotate) pairs:
+				// For NE→SW: try (false,false,false) and (true,true,false)
+				// For NW→SE: try (false,true,true) and (true,false,false) [last one actually SE→NW]
+				local candidates;
+				if(isNESW) {
+					// parallel offset (+1,+1) from spine → SE side → flipY=false,flipX=false,rotate=false
+					// parallel offset (-1,-1) from spine → NW side → flipY=true,flipX=true,rotate=false
+					if(pOffX > 0 && pOffY > 0) {
+						candidates = [[false, false, false], [true, true, false]];
+					} else {
+						candidates = [[true, true, false], [false, false, false]];
 					}
 				} else {
-					HgLog.Info("FourWayJunction.Try: right test failed at i=" + i
-						+ " origin=" + HgTile(origin));
-				}
-			}
-
-			if(leftTile == -1) {
-				local leftJ = RightDivergeJunction(origin, flipY, !flipY, rotate);
-				if(leftJ.Build(true)) {
-					if(leftJ.Build(false)) {
-						HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
-							+ " flipY=" + flipY);
-						leftTile = leftJ.GetBranchEndTile();
-						leftPath = leftJ.GetBranchPath();
-						leftInboundPath = leftJ.GetInboundBranchPath();
+					// NW→SE diagonal
+					// parallel offset (+1,-1) → NE side → flipY=false,flipX=true,rotate=true
+					// parallel offset (-1,+1) → SW side → flipY=true,flipX=false,rotate=false [SE→NW variant]
+					if(pOffX > 0 && pOffY < 0) {
+						candidates = [[false, true, true], [true, false, false]];
+					} else {
+						candidates = [[true, false, false], [false, true, true]];
 					}
-				} else {
-					HgLog.Info("FourWayJunction.Try: left test failed at i=" + i
-						+ " origin=" + HgTile(origin));
+				}
+
+				HgLog.Info("FourWayJunction.Try diagonal: i=" + i + " origin=" + HgTile(origin)
+					+ " diagDx=" + dDx + " diagDy=" + dDy
+					+ " pOffX=" + pOffX + " pOffY=" + pOffY);
+
+				// Try right diagonal junction (first candidate)
+				if(rightTile == -1 && candidates.len() > 0) {
+					local c = candidates[0];
+					local jFY = c[0]; local jFX = c[1]; local jR = c[2];
+					if(nearSrc) jFY = !jFY;
+					local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
+					tried++;
+					if(j.Build(true)) {
+						if(j.Build(false)) {
+							HgLog.Info("RightDivergeDiagonalJunction built at " + HgTile(origin)
+								+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
+							rightTile = j.GetBranchEndTile();
+							rightPath = j.GetBranchPath();
+							rightInboundPath = j.GetInboundBranchPath();
+						}
+					} else {
+						// Try fallback candidate
+						if(candidates.len() > 1) {
+							local c2 = candidates[1];
+							local jFY2 = c2[0]; local jFX2 = c2[1]; local jR2 = c2[2];
+							if(nearSrc) jFY2 = !jFY2;
+							local j2 = RightDivergeDiagonalJunction(origin, jFY2, jFX2, jR2);
+							if(j2.Build(true)) {
+								if(j2.Build(false)) {
+									HgLog.Info("RightDivergeDiagonalJunction (fb) built at " + HgTile(origin)
+										+ " flipY=" + jFY2 + " flipX=" + jFX2 + " rotate=" + jR2);
+									rightTile = j2.GetBranchEndTile();
+									rightPath = j2.GetBranchPath();
+									rightInboundPath = j2.GetInboundBranchPath();
+								}
+							} else {
+								HgLog.Info("FourWayJunction.Try: diag right both failed at i=" + i);
+							}
+						} else {
+							HgLog.Info("FourWayJunction.Try: diag right test failed at i=" + i);
+						}
+					}
+				}
+
+				// Try left diagonal junction (second candidate)
+				if(leftTile == -1 && candidates.len() > 1) {
+					local c = candidates[1];
+					local jFY = c[0]; local jFX = c[1]; local jR = c[2];
+					if(nearSrc) jFY = !jFY;
+					local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
+					if(j.Build(true)) {
+						if(j.Build(false)) {
+							HgLog.Info("LeftDivergeDiagonalJunction built at " + HgTile(origin)
+								+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
+							leftTile = j.GetBranchEndTile();
+							leftPath = j.GetBranchPath();
+							leftInboundPath = j.GetInboundBranchPath();
+						}
+					} else {
+						HgLog.Info("FourWayJunction.Try: diag left test failed at i=" + i);
+					}
 				}
 			}
 		}
@@ -3815,5 +3926,92 @@ class FourWayJunction {
 		return {leftTile = leftTile, rightTile = rightTile,
 			leftPath = leftPath, rightPath = rightPath,
 			leftInboundPath = leftInboundPath, rightInboundPath = rightInboundPath};
+	}
+
+	// Check if mainTiles[i-2..i+3] forms a diagonal parallel-track window.
+	// Returns null if not diagonal, or {diagDx, diagDy, parallelOffX, parallelOffY} if valid.
+	// diagDx/diagDy: the net diagonal direction per 2 tiles (e.g. +1,+1 for NW→SE going right-down).
+	// parallelOffX/parallelOffY: perpendicular offset to find the parallel track.
+	static function _CheckDiagonalWindow(mainTiles, p2Set, i) {
+		if(i < 2 || i + 3 >= mainTiles.len()) return null;
+
+		local mm1 = mainTiles[i - 2];
+		local m0  = mainTiles[i - 1];
+		local m1  = mainTiles[i];
+		local m2  = mainTiles[i + 1];
+		local m3  = mainTiles[i + 2];
+		local m4  = mainTiles[i + 3];
+
+		// Compute steps between consecutive tiles
+		local steps = [];
+		local seq = [mm1, m0, m1, m2, m3, m4];
+		for(local k = 0; k < 5; k++) {
+			local sx = AIMap.GetTileX(seq[k+1]) - AIMap.GetTileX(seq[k]);
+			local sy = AIMap.GetTileY(seq[k+1]) - AIMap.GetTileY(seq[k]);
+			steps.push([sx, sy]);
+		}
+
+		// Each step must be axis-aligned (±1, 0) or (0, ±1)
+		foreach(s in steps) {
+			local ax = (s[0] < 0) ? -s[0] : s[0];
+			local ay = (s[1] < 0) ? -s[1] : s[1];
+			if(!((ax == 1 && ay == 0) || (ax == 0 && ay == 1))) return null;
+		}
+
+		// For a diagonal zig-zag, pairs of steps sum to the diagonal direction.
+		// Steps 0+1 (mm1→m1), 2+3 (m1→m3), and optionally 1+2 (m0→m2) should all sum consistently.
+		local net01x = steps[0][0] + steps[1][0];
+		local net01y = steps[0][1] + steps[1][1];
+		local net23x = steps[2][0] + steps[3][0];
+		local net23y = steps[2][1] + steps[3][1];
+
+		// Net steps must be diagonal: |net_x|==1 && |net_y|==1
+		local ax01 = (net01x < 0) ? -net01x : net01x;
+		local ay01 = (net01y < 0) ? -net01y : net01y;
+		if(ax01 != 1 || ay01 != 1) return null;
+		if(net23x != net01x || net23y != net01y) return null;
+
+		// Also verify step pair 1+2 is consistent
+		local net12x = steps[1][0] + steps[2][0];
+		local net12y = steps[1][1] + steps[2][1];
+		if(net12x != net01x || net12y != net01y) return null;
+
+		// diagDx/diagDy is the net diagonal step direction
+		local diagDx = net01x;
+		local diagDy = net01y;
+
+		// Perpendicular offsets to diagonal (diagDx,diagDy):
+		// For NE→SW diagonal (diagDx*diagDy < 0, e.g. +1,-1): perp is (+1,+1) or (-1,-1)
+		// For NW→SE diagonal (diagDx*diagDy > 0, e.g. +1,+1): perp is (+1,-1) or (-1,+1)
+		local perpOptions;
+		if(diagDx * diagDy < 0) {
+			perpOptions = [[1, 1], [-1, -1]];
+		} else {
+			perpOptions = [[1, -1], [-1, 1]];
+		}
+
+		// Find which perpendicular offset has parallel tiles for m0, m1, m2, m3
+		local parallelOffX = null;
+		local parallelOffY = null;
+		foreach(perp in perpOptions) {
+			local allFound = true;
+			foreach(mt in [m0, m1, m2, m3]) {
+				local candidate = AIMap.GetTileIndex(
+					AIMap.GetTileX(mt) + perp[0],
+					AIMap.GetTileY(mt) + perp[1]
+				);
+				if(!p2Set.rawin(candidate)) { allFound = false; break; }
+			}
+			if(allFound) {
+				parallelOffX = perp[0];
+				parallelOffY = perp[1];
+				break;
+			}
+		}
+
+		if(parallelOffX == null) return null;
+
+		return {diagDx = diagDx, diagDy = diagDy,
+			parallelOffX = parallelOffX, parallelOffY = parallelOffY};
 	}
 }
