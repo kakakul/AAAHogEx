@@ -5,6 +5,9 @@ from collections import deque
 WSL_OPENTTD   = '/home/sy/openttd-15.3-linux-generic-amd64/openttd'
 WSL_SCRIPTS   = '/home/sy/.local/share/openttd/scripts'
 WSL_CFG       = '/home/sy/.config/openttd/openttd.cfg'
+# OpenTTD also looks in the cwd/scripts/ directory for game_start.scr; this takes
+# precedence over the personal_dir when running with tests/ as cwd.
+LOCAL_SCRIPTS = '/mnt/c/Program Files (x86)/Steam/steamapps/common/OpenTTD/ai/HogNet/tests/scripts'
 TICKS_PER_DAY = 74
 DEFAULT_SEED  = 42
 
@@ -39,10 +42,14 @@ def run_hognet(network_mode=0, days=365 * 3, seed=DEFAULT_SEED, extra_params=())
         check=True,
     )
 
-    # Write game_start.scr into WSL openttd personal dir via wsl bash.
-    scr_content = f'start_ai HogNet {params_str}\\n'
+    # Write game_start.scr into BOTH the WSL personal dir AND the local scripts dir
+    # (openttd with tests/ as cwd reads from cwd/scripts/ which takes precedence).
+    # Params must be quoted so multiple comma-separated params are parsed as one config string.
+    scr_content = f'start_ai HogNet \\"{params_str}\\"\\n'
     subprocess.run(
-        ['wsl', 'bash', '-c', f'mkdir -p {WSL_SCRIPTS} && printf "{scr_content}" > {WSL_SCRIPTS}/game_start.scr'],
+        ['wsl', 'bash', '-c',
+         f'mkdir -p {WSL_SCRIPTS} && printf "{scr_content}" > {WSL_SCRIPTS}/game_start.scr && '
+         f'mkdir -p "{LOCAL_SCRIPTS}" && printf "{scr_content}" > "{LOCAL_SCRIPTS}/game_start.scr"'],
         check=True,
     )
 

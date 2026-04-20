@@ -145,6 +145,11 @@
 			hard_value = 1,
 			custom_value = 1,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+
+		AddSetting({name = "probe_diag_junction",
+			description = "Run diagonal junction probe tests",
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 	}
  }
 

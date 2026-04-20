@@ -3189,6 +3189,190 @@ class RightDivergeDiagonalJunction {
 	y=+1:             (2,1,→)    (1,1,→S)    (0,1,↘→)  (-1,1,↘→↖)  (-2,1,↖)
 	y=+2:                                               (-1,2,↘)   (-2,2,↘↖S) (-3,2,↖)
 	*/
+
+	originTile = null;
+	flipX = null;
+	flipY = null;
+	rotate = null;
+
+	constructor(tile, flipY_ = false, flipX_ = false, rotate_ = false) {
+		this.originTile = tile;
+		this.flipY = flipY_;
+		this.flipX = flipX_;
+		this.rotate = rotate_;
+	}
+
+	function Transform(x, y) {
+		local tx = rotate ? y : x;
+		local ty = rotate ? x : y;
+		local fx = flipX ? -tx : tx;
+		local fy = flipY ? -ty : ty;
+		return [fx, fy];
+	}
+
+	function TransformDir(dx, dy) {
+		local tx = rotate ? dy : dx;
+		local ty = rotate ? dx : dy;
+		local fx = flipX ? -tx : tx;
+		local fy = flipY ? -ty : ty;
+		return [fx, fy];
+	}
+
+	function At(x, y) {
+		local t = Transform(x, y);
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + t[0],
+			AIMap.GetTileY(originTile) + t[1]);
+	}
+
+	function BuildSignals(x, y, dx, dy, pbs) {
+		local signalTile = At(x, y);
+		local d = TransformDir(dx, dy);
+		local neighborTile = AIMap.GetTileIndex(
+			AIMap.GetTileX(signalTile) + d[0],
+			AIMap.GetTileY(signalTile) + d[1]);
+		BuildUtils.BuildSignalSafe(signalTile, neighborTile, pbs);
+	}
+
+	function GetRequiredTiles() {
+		return [
+			[-2,-1], [-1,-1], [0,-1],
+			         [0,0],   [1,0],  [2,0], [3,0],
+			         [0,1],   [1,1],  [2,1], [3,1],
+			                          [2,2], [3,2],
+		];
+	}
+
+	function GetRails() {
+		// Every triple [a,b,c] must have a,c each Manhattan-1 from b.
+		// The diagonal spine is a zig-zag: (-2,-1)→(-1,-1)→(0,-1)→(0,0)→(1,0)→(1,1)→(2,1)→(2,2)→(3,2).
+		return [
+			// Diagonal spine: zig-zag along (-2,-1)->(-1,-1)->(0,-1)->(0,0)->(1,0)->(1,1)->(2,1)->(2,2)->(3,2)
+			[[-2,-1],[-1,-1],[0,-1]],   // straight at (-1,-1)
+			[[-1,-1],[0,-1],[0,0]],     // bend at (0,-1)
+			[[0,-1],[0,0],[1,0]],       // bend at (0,0)
+			[[0,0],[1,0],[1,1]],        // bend at (1,0)
+			[[1,0],[1,1],[2,1]],        // bend at (1,1)
+			[[1,1],[2,1],[2,2]],        // bend at (2,1)
+			[[2,1],[2,2],[3,2]],        // bend at (2,2)
+			// Branch outbound (to (3,0)): tiles (0,1)->(1,1)? No. Outbound uses y=0 row.
+			// Outbound path: (0,0)->(1,0)->(2,0)->(3,0)  (y=0 row)
+			// (0,0) and (1,0) already have spine tracks; add the outbound-only straight tracks.
+			[[1,0],[2,0],[3,0]],        // straight NE_SW at (2,0)
+			[[0,0],[1,0],[2,0]],        // straight NE_SW at (1,0) - adds 2nd track on tile
+			// Branch inbound (from (3,1)): y=1 row (3,1)->(2,1)->(1,1)->(0,1) then merge to spine
+			[[3,1],[2,1],[1,1]],        // straight at (2,1) - 2nd track
+			[[2,1],[1,1],[0,1]],        // bend at (1,1) - 2nd track
+			[[1,1],[0,1],[0,0]],        // bend at (0,1) (merge into spine at (0,0))
+		];
+	}
+
+	function GetBranchEndTile() {
+		return At(3, 1);
+	}
+
+	function GetBranchPath() {
+		return [At(3,0), At(2,0), At(1,0), At(0,0), At(0,-1)];
+	}
+
+	function GetInboundBranchPath() {
+		return [At(3,1), At(2,1), At(1,1), At(0,1), At(0,0), At(0,-1)];
+	}
+
+	function CollectAndRemoveSignals() {
+		local mapW = AIMap.GetMapSizeX();
+		local saved = [];
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!AIRail.IsRailTile(t)) continue;
+			local neighbors = [
+				t - 1, t + 1, t - mapW, t + mapW,
+				t - mapW - 1, t - mapW + 1, t + mapW - 1, t + mapW + 1
+			];
+			foreach(nb in neighbors) {
+				if(!AIMap.IsValidTile(nb)) continue;
+				local stype = AIRail.GetSignalType(t, nb);
+				if(stype != AIRail.SIGNALTYPE_NONE) {
+					HgLog.Info("RightDivergeDiagonalJunction: removing signal at " + HgTile(t)
+						+ " facing " + HgTile(nb) + " type=" + stype);
+					saved.push([t, nb, stype]);
+					BuildUtils.RemoveSignalSafe(t, nb);
+				}
+			}
+		}
+		return saved;
+	}
+
+	function RestoreSignals(saved) {
+		foreach(sig in saved) {
+			HgLog.Info("RightDivergeDiagonalJunction: restoring signal at " + HgTile(sig[0])
+				+ " facing " + HgTile(sig[1]) + " type=" + sig[2]);
+			BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
+		}
+	}
+
+	function Build(isTestMode = true) {
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
+				HgLog.Info("RightDivergeDiagonalJunction.Build: blocked at ["
+					+ xy[0] + "," + xy[1] + "] " + HgTile(t)
+					+ (isTestMode ? " (test)" : " (real)"));
+				return false;
+			}
+		}
+		if(isTestMode) return true;
+
+		// Level every required tile to the same height as the junction origin.
+		local allTiles = [];
+		foreach(xy in GetRequiredTiles()) {
+			allTiles.push(At(xy[0], xy[1]));
+		}
+		local tileList = TileListUtils.GetLevelTileList(allTiles);
+		tileList.Valuate(AITile.GetCornerHeight, AITile.CORNER_N);
+		local trackHeight = AITile.GetMinHeight(At(0, 0));
+		local levelTrack = rotate ? AIRail.RAILTRACK_NE_SW : AIRail.RAILTRACK_NW_SE;
+		if(!TileListUtils.LevelAverage(tileList, levelTrack, false, trackHeight, true)) {
+			HgLog.Warning("RightDivergeDiagonalJunction.Build: LevelTiles failed");
+			return false;
+		}
+
+		local savedSignals = CollectAndRemoveSignals();
+		local builtRails = [];
+
+		foreach(r in GetRails()) {
+			local a = At(r[0][0], r[0][1]);
+			local b = At(r[1][0], r[1][1]);
+			local c = At(r[2][0], r[2][1]);
+			if(RailBuilder.BuildRailSafe(a, b, c)) {
+				builtRails.push([a, b, c]);
+			} else if(AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) {
+				HgLog.Info("RightDivergeDiagonalJunction.Build: already built at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b) + " (ok)");
+			} else {
+				HgLog.Warning("RightDivergeDiagonalJunction.Build: rail failed at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b)
+					+ " err=" + AIError.GetLastErrorString());
+				foreach(built in builtRails) {
+					AIRail.RemoveRail(built[0], built[1], built[2]);
+				}
+				RestoreSignals(savedSignals);
+				return false;
+			}
+		}
+
+		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		// Spine SW-bound signal at (0,-1), train continues toward (0,0).
+		BuildSignals(0, -1, 0, 1, pbs);
+		// Spine SW-bound signal at (2,2), train continues toward (3,2).
+		BuildSignals(2, 2, 1, 0, pbs);
+		// Branch inbound signal at (3,1), train continues toward (2,1).
+		BuildSignals(3, 1, -1, 0, pbs);
+
+		HgLog.Info("RightDivergeDiagonalJunction: built at origin " + HgTile(originTile)
+			+ " flipY=" + flipY + " flipX=" + flipX + " rotate=" + rotate);
+		return true;
+	}
 }
 
 
