@@ -3155,6 +3155,43 @@ class RailRemover extends Construction {
 Construction.nameClass.RailRemover <- RailRemover;
 
 
+class RightDivergeDiagonalJunction {
+	/*
+	Layout (flipY=false, flipX=false, rotate=false) (S for signal placement and arrows for direction of travel):
+	Layout (NE→SW spine, branch towards West)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:  (3,0,←)    (2,0,←)    (1,0,←↙)   (0,0,↙←↗)  (-1,0,↗)
+	y=+1:  (3,1,→S)   (2,1,→↙)   (1,1,↙→↗)  (0,1,↗)
+	y=+2:  (3,2,↙)    (2,2,↙↗S)  (1,2,↗)
+
+	Layout (flipY=false, flipX=true, rotate=true) (S for signal placement and arrows for direction of travel):
+	Layout (NE→SW spine, branch towards South)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:                        (1,0,↙)    (0,0,↙↑↗)  (-1,0,↗)
+	y=+1:             (2,1,↙)   (1,1,↙↓↗)  (0,1,↗↑)
+	y=+2:  (3,2,↙)   (2,2,↙↗S)  (1,2,↗↓)   (0,2,↑S)
+
+	Layout (flipY=true, flipX=true, rotate=false) (S for signal placement and arrows for direction of travel):
+	Layout (SW→NE spine, branch towards East)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:                        (1,0,↙)    (0,0,↙←↗)  (-1,0,↗←)    (-2,0,←S)
+	y=+1:             (2,1,↙)   (1,1,↙→↗)  (0,1,↗→)    (-1,1,→)     (-2,1,→)
+	y=+2:  (3,2,↙)   (2,2,↙↗S)  (1,2,↗)
+
+	Layout (flipY=true, flipX=false, rotate=false) (S for signal placement and arrows for direction of travel):
+	Layout (SE→NW spine, branch towards West)
+			x=3        x=2        x=1        x=0         x=-1        x=-2        x=-3
+	y=-1:            (2,-1,↘)  (1,-1,S↘↖)   (0,-1,↖)
+	y= 0:             (2,0,←)   (1,0,←↘)    (0,0,↘←↖)  (-1,0,↖)
+	y=+1:             (2,1,→)    (1,1,→S)    (0,1,↘→)  (-1,1,↘→↖)  (-2,1,↖)
+	y=+2:                                               (-1,2,↘)   (-2,2,↘↖S) (-3,2,↖)
+	*/
+}
+
+
 class RightDivergeJunction {
 	/*
 	Double-track main line running north-south splits into a double-track branch going south-west.
@@ -3301,10 +3338,10 @@ class RightDivergeJunction {
 
 	function GetRequiredTiles() {
 		return [
-			[0,-2],[0,-1],[0,0],[0,1],[0,2],          
-			[1,-2],[1,-1],[1,0],[1,1],[1,2],           
-			[2,0],[2,1],[2,2],                 
-			[3,1],[3,2],                 
+			[0,-2],[0,-1],[0,0],[0,1],[0,2],
+			[1,-2],[1,-1],[1,0],[1,1],[1,2],
+			[2,0],[2,1],[2,2],
+			[3,1],[3,2],
 		];
 	}
 
@@ -3502,7 +3539,7 @@ class FourWayJunction {
 					AIMap.GetTileX(mt) + offset * offX,
 					AIMap.GetTileY(mt) + offset * offY
 				);
-				
+
 				if(AITile.GetMinHeight(par) != baseHeight) {
 					levelOk = false; break;
 				}
