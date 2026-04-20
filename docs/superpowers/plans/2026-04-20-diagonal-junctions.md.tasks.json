@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 1: Implement RightDivergeDiagonalJunction",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Produce a fully working RightDivergeDiagonalJunction class that can test-mode-check and build a diagonal junction at a given origin tile for all four flip/rotate configurations.\n\n**Files:**\n- Modify: `railbuilder.nut:3158-3192`\n\n**Acceptance Criteria:**\n- [ ] Build(true) returns true on a flat clear area for all four orientations\n- [ ] Build(false) places rails and signals visible in-game for canonical orientation\n- [ ] GetBranchEndTile, GetBranchPath, GetInboundBranchPath return contiguous chains\n- [ ] No errors in AI debug log on load\n\n**Verify:** Load AI in new game, trigger Build(true) then Build(false) for canonical orientation; observe rails and signals in-game.\n\n**Steps:**\n1. Add fields, constructor, structural stubs\n2. Add temporary probe call to trigger Build(false) in-game\n3. Derive Transform and TransformDir iteratively via log-based testing\n4. Derive GetRails, GetBranchEndTile, GetBranchPath, GetInboundBranchPath\n5. Add signal placements to Build()\n6. Remove probe code and commit\n\n```json:metadata\n{\"files\": [\"railbuilder.nut\"], \"verifyCommand\": \"Load AI in OpenTTD, observe diagonal junction built on map\", \"acceptanceCriteria\": [\"Build(true) returns true for all four orientations\", \"Build(false) places correct rails and signals\", \"Path getters return contiguous tile chains\", \"No AI debug log errors\"]}\n```"
     },
     {

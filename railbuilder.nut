@@ -3682,8 +3682,8 @@ class FourWayJunction {
 			if(AIMap.GetTileY(m4) != AIMap.GetTileY(m3)) isEW = false;
 			if(AIMap.GetTileX(m4) - AIMap.GetTileX(m3) != dx) isEW = false;
 
-			// --- Try diagonal window ---
-			local diagWindow = FourWayJunction._CheckDiagonalWindow(mainTiles, p2Set, i);
+			// Only check diagonal window if not already detected as straight track
+			local diagWindow = (!isNS && !isEW) ? FourWayJunction._CheckDiagonalWindow(mainTiles, p2Set, i) : null;
 
 			if(!isNS && !isEW && diagWindow == null) continue;
 
@@ -3862,61 +3862,51 @@ class FourWayJunction {
 					+ " diagDx=" + dDx + " diagDy=" + dDy
 					+ " pOffX=" + pOffX + " pOffY=" + pOffY);
 
-				// Try right diagonal junction (first candidate)
-				if(rightTile == -1 && candidates.len() > 0) {
-					local c = candidates[0];
-					local jFY = c[0]; local jFX = c[1]; local jR = c[2];
-					if(nearSrc) jFY = !jFY;
-					local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
-					tried++;
-					if(j.Build(true)) {
-						if(j.Build(false)) {
-							HgLog.Info("RightDivergeDiagonalJunction built at " + HgTile(origin)
-								+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
-							rightTile = j.GetBranchEndTile();
-							rightPath = j.GetBranchPath();
-							rightInboundPath = j.GetInboundBranchPath();
-						}
-					} else {
-						// Try fallback candidate
-						if(candidates.len() > 1) {
-							local c2 = candidates[1];
-							local jFY2 = c2[0]; local jFX2 = c2[1]; local jR2 = c2[2];
-							if(nearSrc) jFY2 = !jFY2;
-							local j2 = RightDivergeDiagonalJunction(origin, jFY2, jFX2, jR2);
-							if(j2.Build(true)) {
-								if(j2.Build(false)) {
-									HgLog.Info("RightDivergeDiagonalJunction (fb) built at " + HgTile(origin)
-										+ " flipY=" + jFY2 + " flipX=" + jFX2 + " rotate=" + jR2);
-									rightTile = j2.GetBranchEndTile();
-									rightPath = j2.GetBranchPath();
-									rightInboundPath = j2.GetInboundBranchPath();
-								}
-							} else {
-								HgLog.Info("FourWayJunction.Try: diag right both failed at i=" + i);
+				// Try right and left diagonal junctions from the candidate list.
+				// Track which candidate index was consumed for right so left skips it.
+				local rightCandIdx = -1;
+				if(rightTile == -1) {
+					for(local ci = 0; ci < candidates.len(); ci++) {
+						local c = candidates[ci];
+						local jFY = c[0]; local jFX = c[1]; local jR = c[2];
+						// nearSrc: flip both FY and FX (they are coupled in the diagonal layout)
+						if(nearSrc) { jFY = !jFY; jFX = !jFX; }
+						local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
+						tried++;
+						if(j.Build(true)) {
+							if(j.Build(false)) {
+								HgLog.Info("RightDivergeDiagonalJunction built at " + HgTile(origin)
+									+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
+								rightTile = j.GetBranchEndTile();
+								rightPath = j.GetBranchPath();
+								rightInboundPath = j.GetInboundBranchPath();
+								rightCandIdx = ci;
 							}
-						} else {
-							HgLog.Info("FourWayJunction.Try: diag right test failed at i=" + i);
+							break;
 						}
+						HgLog.Info("FourWayJunction.Try: diag right cand=" + ci + " failed at i=" + i);
 					}
 				}
 
-				// Try left diagonal junction (second candidate)
-				if(leftTile == -1 && candidates.len() > 1) {
-					local c = candidates[1];
-					local jFY = c[0]; local jFX = c[1]; local jR = c[2];
-					if(nearSrc) jFY = !jFY;
-					local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
-					if(j.Build(true)) {
-						if(j.Build(false)) {
-							HgLog.Info("LeftDivergeDiagonalJunction built at " + HgTile(origin)
-								+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
-							leftTile = j.GetBranchEndTile();
-							leftPath = j.GetBranchPath();
-							leftInboundPath = j.GetInboundBranchPath();
+				if(leftTile == -1) {
+					for(local ci = 0; ci < candidates.len(); ci++) {
+						if(ci == rightCandIdx) continue;
+						local c = candidates[ci];
+						local jFY = c[0]; local jFX = c[1]; local jR = c[2];
+						if(nearSrc) { jFY = !jFY; jFX = !jFX; }
+						local j = RightDivergeDiagonalJunction(origin, jFY, jFX, jR);
+						tried++;
+						if(j.Build(true)) {
+							if(j.Build(false)) {
+								HgLog.Info("LeftDivergeDiagonalJunction built at " + HgTile(origin)
+									+ " flipY=" + jFY + " flipX=" + jFX + " rotate=" + jR);
+								leftTile = j.GetBranchEndTile();
+								leftPath = j.GetBranchPath();
+								leftInboundPath = j.GetInboundBranchPath();
+							}
+							break;
 						}
-					} else {
-						HgLog.Info("FourWayJunction.Try: diag left test failed at i=" + i);
+						HgLog.Info("FourWayJunction.Try: diag left cand=" + ci + " failed at i=" + i);
 					}
 				}
 			}
