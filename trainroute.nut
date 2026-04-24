@@ -153,6 +153,8 @@ class TrainRoute extends Route {
 		trainRoute.oldCargoProduction = t.oldCargoProduction;
 		trainRoute.lastConvertRail = t.rawin("lastConvertRail") ? t.lastConvertRail : null;
 		trainRoute.lastChangeDestDate = t.lastChangeDestDate;
+		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
+		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
 		trainRoute.saveData = t;
 		//trainRoute.usedRateHistory = t.rawin("usedRateHistory") ? t.usedRateHistory : [];
 		trainRoute.InitializeCargoSet();
@@ -302,6 +304,8 @@ class TrainRoute extends Route {
 	lastChangeDestDate = null;
 	cannotChangeDest = null;
 	oldCargoProduction = null;
+	lostVehicleCount = null;
+	lostSuppressUntil = null;
 
 	saveData = null;
 
@@ -337,6 +341,8 @@ class TrainRoute extends Route {
 		this.trainLength = 7;
 		this.additionalTiles = [];
 		this.cannotChangeDest = false;
+		this.lostVehicleCount = 0;
+		this.lostSuppressUntil = 0;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -394,6 +400,8 @@ class TrainRoute extends Route {
 		t.lastChangeDestDate <- lastChangeDestDate;
 		t.cannotChangeDest <- cannotChangeDest;
 		t.oldCargoProduction <- oldCargoProduction;
+		t.lostVehicleCount <- lostVehicleCount;
+		t.lostSuppressUntil <- lostSuppressUntil;
 		t.returnRoute <- null; // SaveStaticで保存する
 		saveData = t;
 	}
@@ -2413,6 +2421,23 @@ class TrainRoute extends Route {
 		if(isClosed || isRemoved || updateRailDepot!=null || IsSingle()) {
 			return;
 		}
+		if(lostSuppressUntil > 0) {
+			local today = AIDate.GetCurrentDate();
+			if(today < lostSuppressUntil) return;
+			// Timer expired: decay count by 1 and set a new timer at the lower level
+			lostVehicleCount--;
+			if(lostVehicleCount > 0) {
+				lostSuppressUntil = today + GetLostSuppressDays(lostVehicleCount);
+				HgLog.Info("TrainRoute.CheckCloneTrain: lost suppress decayed to count="
+					+ lostVehicleCount + ", suppressing " + GetLostSuppressDays(lostVehicleCount) + " more days " + this);
+			} else {
+				lostSuppressUntil = 0;
+				HgLog.Info("TrainRoute.CheckCloneTrain: lost suppress cleared " + this);
+			}
+			saveData.lostVehicleCount = lostVehicleCount;
+			saveData.lostSuppressUntil = lostSuppressUntil;
+			return;
+		}
 		local ng = false;
 		local srcStationId = srcHgStation.GetAIStation()
 		local srcStationStops = [];
@@ -2650,9 +2675,18 @@ class TrainRoute extends Route {
 		}
 	}
 
+	function GetLostSuppressDays(count) {
+		if(count <= 1) return 365;
+	}
+
 	function OnVehicleLost(vehicle) {
-		HgLog.Warning("RailRoute OnVehicleLost  "+this);
-		// SendVehicleToDepot(vehicle); 全部いなくなる事がある
+		lostVehicleCount++;
+		local days = GetLostSuppressDays(lostVehicleCount);
+		lostSuppressUntil = AIDate.GetCurrentDate() + days;
+		saveData.lostVehicleCount = lostVehicleCount;
+		saveData.lostSuppressUntil = lostSuppressUntil;
+		HgLog.Warning("TrainRoute.OnVehicleLost: suppressing new trains for " + days
+			+ " days (lostCount=" + lostVehicleCount + ") " + this);
 	}
 }
 
