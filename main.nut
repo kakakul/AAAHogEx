@@ -269,15 +269,6 @@ class HogeAI extends AIController {
 		HgLog.Info("HogNet Started! version:"+HogeAI.version+" name:"+AICompany.GetName(AICompany.COMPANY_SELF));
 		HgLog.Info("openttd version:"+openttdVersion);
 
-		local probeVal = AIController.GetSetting("probe_diag_junction");
-		HgLog.Info("DiagProbe setting value: " + probeVal);
-		if(probeVal == 1 && IsNetworkMode()) {
-			UpdateSettings();
-			_RunDiagJunctionProbe();
-			HgLog.Info("DiagProbe complete, idling.");
-			while(true) { AIController.Sleep(1000); }
-		}
-
 		/*
 		foreach(town,_ in AITownList()) {
 			local s = []
@@ -4864,98 +4855,6 @@ class HogeAI extends AIController {
 		HgLog.Info("}");
 	}
 
-	function _RunDiagJunctionProbe() {
-		// Pick any available rail type; required before AIRail.BuildRail works.
-		local railTypes = AIRailTypeList();
-		if(!railTypes.IsEmpty()) {
-			AIRail.SetCurrentRailType(railTypes.Begin());
-			HgLog.Info("DiagProbe: using rail type " + railTypes.Begin());
-		} else {
-			HgLog.Warning("DiagProbe: no rail types available");
-			return;
-		}
-		local flags = [
-			[false, false, false],
-			[false, true,  true ],
-			[true,  true,  false],
-			[true,  false, false],
-		];
-		// Find 4 flat origins spaced apart; each orientation needs ~8 tiles in all directions clear.
-		local flatOrigins = _FindDiagProbeOrigins(flags);
-		if(flatOrigins.len() < 4) {
-			HgLog.Warning("DiagProbe: could not find 4 flat origins, found " + flatOrigins.len());
-			return;
-		}
-		local origins = [];
-		for(local i = 0; i < 4; i++) {
-			origins.push([flatOrigins[i], flags[i][0], flags[i][1], flags[i][2]]);
-		}
-		foreach(o in origins) {
-			local j = RightDivergeDiagonalJunction(o[0], o[1], o[2], o[3]);
-			local testOk = j.Build(true);
-			HgLog.Info("DiagProbe Build(true) flipY=" + o[1] + " flipX=" + o[2]
-				+ " rotate=" + o[3] + ": " + (testOk ? "OK" : "BLOCKED"));
-		}
-
-		local j0 = RightDivergeDiagonalJunction(origins[0][0], false, false, false);
-		if(j0.Build(true)) {
-			local built = j0.Build(false);
-			HgLog.Info("DiagProbe Build(false) canonical: " + (built ? "OK" : "FAILED"));
-
-			local bp = j0.GetBranchPath();
-			local ip = j0.GetInboundBranchPath();
-			local bpOk = true;
-			local ipOk = true;
-			for(local k = 1; k < bp.len(); k++) {
-				local dx = AIMap.GetTileX(bp[k]) - AIMap.GetTileX(bp[k-1]);
-				local dy = AIMap.GetTileY(bp[k]) - AIMap.GetTileY(bp[k-1]);
-				local dist = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-				if(dist > 1) { bpOk = false; break; }
-			}
-			for(local k = 1; k < ip.len(); k++) {
-				local dx = AIMap.GetTileX(ip[k]) - AIMap.GetTileX(ip[k-1]);
-				local dy = AIMap.GetTileY(ip[k]) - AIMap.GetTileY(ip[k-1]);
-				local dist = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-				if(dist > 1) { ipOk = false; break; }
-			}
-			HgLog.Info("DiagProbe BranchPath len=" + bp.len() + " contiguous=" + bpOk);
-			HgLog.Info("DiagProbe InboundPath len=" + ip.len() + " contiguous=" + ipOk);
-		}
-	}
-
-	function _FindDiagProbeOrigins(flags) {
-		local mapW = AIMap.GetMapSizeX();
-		local mapH = AIMap.GetMapSizeY();
-		local found = [];
-		// Scan with a stride; accept origin iff Build(true) succeeds for every orientation.
-		// Margin: Transform range is ~[-2,3]x[-2,2] so 8 tiles clearance in all directions.
-		local margin = 8;
-		local stride = 6;
-		for(local y = margin; y < mapH - margin && found.len() < flags.len(); y += stride) {
-			for(local x = margin; x < mapW - margin && found.len() < flags.len(); x += stride) {
-				local origin = AIMap.GetTileIndex(x, y);
-				local allOk = true;
-				foreach(f in flags) {
-					local jt = RightDivergeDiagonalJunction(origin, f[0], f[1], f[2]);
-					if(!jt.Build(true)) { allOk = false; break; }
-				}
-				if(allOk) {
-					// Avoid picking origins too close together.
-					local tooClose = false;
-					foreach(prev in found) {
-						local dx = AIMap.GetTileX(prev) - x;
-						local dy = AIMap.GetTileY(prev) - y;
-						if(dx*dx + dy*dy < 400) { tooClose = true; break; }
-					}
-					if(!tooClose) {
-						found.push(origin);
-						HgLog.Info("DiagProbe: candidate origin at " + x + "," + y);
-					}
-				}
-			}
-		}
-		return found;
-	}
 }
 
 class RouteCandidates {

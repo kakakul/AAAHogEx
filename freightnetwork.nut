@@ -173,11 +173,7 @@ class FreightNetwork {
 				}
 				if(!produces) continue;
 				if(AIIndustryType.IsProcessingIndustry(srcType)) {
-					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
-						HgLog.Info("FreightNetwork.ScanFeeders: skipping idle processing source "
-							+ AIIndustry.GetName(indId));
-						continue;
-					}
+					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) continue;
 				}
 				FreightNetwork.pendingFeeders.push({
 					srcIndustry = indId,
@@ -217,11 +213,7 @@ class FreightNetwork {
 				}
 				if(!produces) continue;
 				if(AIIndustryType.IsProcessingIndustry(srcType)) {
-					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
-						HgLog.Info("FreightNetwork.ScanDestFeeders: skipping idle processing source "
-							+ AIIndustry.GetName(indId));
-						continue;
-					}
+					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) continue;
 				}
 				FreightNetwork.pendingFeeders.insert(insertPos, {
 					srcIndustry = indId,
@@ -382,11 +374,7 @@ class FreightNetwork {
 						local production = AIIndustry.GetLastMonthProduction(src.id, cargo);
 						local srcType = AIIndustry.GetIndustryType(src.id);
 						if(AIIndustryType.IsProcessingIndustry(srcType)) {
-							if(production <= 0) {
-								HgLog.Info("FreightNetwork.FindSpine: skipping idle processing source "
-									+ AIIndustry.GetName(src.id));
-								continue;
-							}
+							if(production <= 0) continue;
 						} else {
 							if(production <= 0) production = 80; // floor for month 0 before any production recorded
 						}
@@ -687,11 +675,7 @@ class FreightNetwork {
 					}
 					if(matchCargo == -1) continue;
 					if(AIIndustryType.IsProcessingIndustry(srcType)) {
-						if(AIIndustry.GetLastMonthProduction(indId, matchCargo) <= 0) {
-							HgLog.Info("FreightNetwork.SearchAndConnect: skipping idle processing source "
-								+ AIIndustry.GetName(indId));
-							continue;
-						}
+						if(AIIndustry.GetLastMonthProduction(indId, matchCargo) <= 0) continue;
 					}
 					if(AIMap.DistanceManhattan(indLoc, mergeTile) < 30) continue;
 					// Reject industries not in the same direction to the destination
