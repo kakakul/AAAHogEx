@@ -72,3 +72,13 @@ def test_spur_connects_via_junction(seed):
     assert 'FreightNetwork.SearchAndConnect: connected via junction' in row['output'], (
         f"Expected spur to connect via junction\nOutput:\n{row['output']}"
     )
+
+
+@pytest.mark.parametrize("seed", [42])
+def test_spine_built_no_idle_processing_crash(seed):
+    """Spine builds correctly with idle-processing-source guard active."""
+    row = run_hognet(network_mode=1, days=365 * 3, seed=seed)
+    assert not row['error'], f"AI crashed:\n{row['output']}"
+    assert 'FreightNetwork.FindSpine: spine built' in row['output'], (
+        f"Expected spine to be built\nOutput:\n{row['output']}"
+    )

@@ -167,6 +167,13 @@ class FreightNetwork {
 				if(pc == cargo) { produces = true; break; }
 			}
 			if(!produces) continue;
+			if(AIIndustryType.IsProcessingIndustry(srcType)) {
+				if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
+					HgLog.Info("FreightNetwork.ScanFeeders: skipping idle processing source "
+						+ AIIndustry.GetName(indId));
+					continue;
+				}
+			}
 			FreightNetwork.pendingFeeders.push({
 				srcIndustry = indId,
 				branchStationTile = stationTile,
@@ -300,7 +307,16 @@ class FreightNetwork {
 						}
 
 						local production = AIIndustry.GetLastMonthProduction(src.id, cargo);
-						if(production <= 0) production = 80; // floor for month 0 before any production recorded
+						local srcType = AIIndustry.GetIndustryType(src.id);
+						if(AIIndustryType.IsProcessingIndustry(srcType)) {
+							if(production <= 0) {
+								HgLog.Info("FreightNetwork.FindSpine: skipping idle processing source "
+									+ AIIndustry.GetName(src.id));
+								continue;
+							}
+						} else {
+							if(production <= 0) production = 80; // floor for month 0 before any production recorded
+						}
 						local estimate = Route.Estimate(
 							AIVehicle.VT_RAIL, cargo, dist, production, false, infraTypes);
 						if(estimate == null || estimate.value <= 0) continue;
