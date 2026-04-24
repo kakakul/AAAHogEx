@@ -608,6 +608,13 @@ class FreightNetwork {
 						if(matchCargo != -1) break;
 					}
 					if(matchCargo == -1) continue;
+					if(AIIndustryType.IsProcessingIndustry(srcType)) {
+						if(AIIndustry.GetLastMonthProduction(indId, matchCargo) <= 0) {
+							HgLog.Info("FreightNetwork.SearchAndConnect: skipping idle processing source "
+								+ AIIndustry.GetName(indId));
+							continue;
+						}
+					}
 					if(AIMap.DistanceManhattan(indLoc, mergeTile) < 30) continue;
 					// Reject industries not in the same direction to the destination
 					local toMerge = FreightNetwork.GetPrimaryDirection(indLoc, mergeTile);
