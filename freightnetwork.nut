@@ -152,36 +152,88 @@ class FreightNetwork {
 	function FreightNetwork::ScanFeeders(branchRoute) {
 		local srcStation = branchRoute.srcHgStation;
 		local stationTile = srcStation.platformTile;
-		local cargo = branchRoute.cargo;
-		local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
+		local destIndustry = FreightNetwork.state.destIndustry;
+		if(!AIIndustry.IsValidIndustry(destIndustry)) return;
+		local destType = AIIndustry.GetIndustryType(destIndustry);
+		local acceptedCargos = AIIndustryType.GetAcceptedCargo(destType);
+		if(acceptedCargos == null) return;
 		local feederRadius = 50;
 
-		foreach(indId, _ in AIIndustryList()) {
-			if(FreightNetwork.servedSources.rawin(indId)) continue;
-			if(indId == branchRoute.srcHgStation.place.industry) continue;
-			local indLoc = AIIndustry.GetLocation(indId);
-			if(AIMap.DistanceManhattan(indLoc, stationTile) > feederRadius) continue;
-			local srcType = AIIndustry.GetIndustryType(indId);
-			local produces = false;
-			foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
-				if(pc == cargo) { produces = true; break; }
-			}
-			if(!produces) continue;
-			if(AIIndustryType.IsProcessingIndustry(srcType)) {
-				if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
-					HgLog.Info("FreightNetwork.ScanFeeders: skipping idle processing source "
-						+ AIIndustry.GetName(indId));
-					continue;
+		foreach(cargo, _ in acceptedCargos) {
+			if(CargoUtils.IsPaxOrMail(cargo)) continue;
+			foreach(indId, _ in AIIndustryList()) {
+				if(FreightNetwork.servedSources.rawin(indId)) continue;
+				if(indId == branchRoute.srcHgStation.place.industry) continue;
+				local indLoc = AIIndustry.GetLocation(indId);
+				if(AIMap.DistanceManhattan(indLoc, stationTile) > feederRadius) continue;
+				local srcType = AIIndustry.GetIndustryType(indId);
+				local produces = false;
+				foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
+					if(pc == cargo) { produces = true; break; }
 				}
+				if(!produces) continue;
+				if(AIIndustryType.IsProcessingIndustry(srcType)) {
+					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
+						HgLog.Info("FreightNetwork.ScanFeeders: skipping idle processing source "
+							+ AIIndustry.GetName(indId));
+						continue;
+					}
+				}
+				FreightNetwork.pendingFeeders.push({
+					srcIndustry = indId,
+					branchStationTile = stationTile,
+					cargo = cargo,
+					branchRouteId = branchRoute.id
+				});
+				HgLog.Info("FreightNetwork.ScanFeeders: queued feeder "
+					+ AIIndustry.GetName(indId) + " -> " + srcStation.GetName()
+					+ " [" + AICargo.GetName(cargo) + "]");
 			}
-			FreightNetwork.pendingFeeders.push({
-				srcIndustry = indId,
-				branchStationTile = stationTile,
-				cargo = cargo,
-				branchRouteId = branchRoute.id
-			});
-			HgLog.Info("FreightNetwork.ScanFeeders: queued feeder "
-				+ AIIndustry.GetName(indId) + " -> " + srcStation.GetName());
+		}
+	}
+
+	function FreightNetwork::ScanDestFeeders(spineRoute) {
+		local destStation = spineRoute.destHgStations[0];
+		local stationTile = destStation.platformTile;
+		local destIndustry = FreightNetwork.state.destIndustry;
+		if(!AIIndustry.IsValidIndustry(destIndustry)) return;
+		local destType = AIIndustry.GetIndustryType(destIndustry);
+		local acceptedCargos = AIIndustryType.GetAcceptedCargo(destType);
+		if(acceptedCargos == null) return;
+		local feederRadius = 50;
+		local insertPos = 0;
+
+		foreach(cargo, _ in acceptedCargos) {
+			if(CargoUtils.IsPaxOrMail(cargo)) continue;
+			foreach(indId, _ in AIIndustryList()) {
+				if(FreightNetwork.servedSources.rawin(indId)) continue;
+				if(indId == destIndustry) continue;
+				local indLoc = AIIndustry.GetLocation(indId);
+				if(AIMap.DistanceManhattan(indLoc, stationTile) > feederRadius) continue;
+				local srcType = AIIndustry.GetIndustryType(indId);
+				local produces = false;
+				foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
+					if(pc == cargo) { produces = true; break; }
+				}
+				if(!produces) continue;
+				if(AIIndustryType.IsProcessingIndustry(srcType)) {
+					if(AIIndustry.GetLastMonthProduction(indId, cargo) <= 0) {
+						HgLog.Info("FreightNetwork.ScanDestFeeders: skipping idle processing source "
+							+ AIIndustry.GetName(indId));
+						continue;
+					}
+				}
+				FreightNetwork.pendingFeeders.insert(insertPos, {
+					srcIndustry = indId,
+					branchStationTile = stationTile,
+					cargo = cargo,
+					branchRouteId = spineRoute.id
+				});
+				insertPos++;
+				HgLog.Info("FreightNetwork.ScanDestFeeders: queued priority feeder "
+					+ AIIndustry.GetName(indId) + " -> " + destStation.GetName()
+					+ " [" + AICargo.GetName(cargo) + "]");
+			}
 		}
 	}
 
@@ -189,7 +241,7 @@ class FreightNetwork {
 		while(FreightNetwork.pendingFeeders.len() > 0) {
 			local feeder = FreightNetwork.pendingFeeders[0];
 
-			// Drop if industry closed or already served
+			// Drop if industry closed or already served by a spine/branch route
 			if(!AIIndustry.IsValidIndustry(feeder.srcIndustry)) {
 				FreightNetwork.pendingFeeders.remove(0);
 				continue;
@@ -216,22 +268,43 @@ class FreightNetwork {
 				return;
 			}
 
-			// dest=StationGroup makes IsTransfer() return true in the builder
-			local src = HgIndustry(feeder.srcIndustry, true);
-			local builder = RoadRouteBuilder(destSg, src, feeder.cargo, {});
-			local route = builder.Build();
-			if(route != null) {
-				FreightNetwork.servedSources.rawset(feeder.srcIndustry, true);
-				FreightNetwork.pendingFeeders.remove(0);
-				HgLog.Info("FreightNetwork.TryBuildFeeder: built feeder "
-					+ AIIndustry.GetName(feeder.srcIndustry) + " -> " + destSg.GetName());
-			} else {
-				// Builder failed and registered NgPlace internally — blacklist this entry
-				HgLog.Warning("FreightNetwork.TryBuildFeeder: builder failed for "
-					+ AIIndustry.GetName(feeder.srcIndustry) + ", blacklisting");
-				FreightNetwork.pendingFeeders.remove(0);
+			// Collect all pending entries for this same industry + station (may be multiple cargos)
+			local batchIndices = [];
+			local batchCargos = [];
+			for(local i = 0; i < FreightNetwork.pendingFeeders.len(); i++) {
+				local f = FreightNetwork.pendingFeeders[i];
+				if(f.srcIndustry == feeder.srcIndustry && f.branchStationTile == feeder.branchStationTile) {
+					batchIndices.push(i);
+					batchCargos.push(f.cargo);
+				}
 			}
-			return; // one attempt per Step()
+
+			// Build one feeder route per cargo; reuses or places a new truck stop per build
+			local anyBuilt = false;
+			foreach(cargo in batchCargos) {
+				local src = HgIndustry(feeder.srcIndustry, true);
+				local builder = RoadRouteBuilder(destSg, src, cargo, {});
+				local route = builder.Build();
+				if(route != null) {
+					anyBuilt = true;
+					HgLog.Info("FreightNetwork.TryBuildFeeder: built feeder "
+						+ AIIndustry.GetName(feeder.srcIndustry) + " -> " + destSg.GetName()
+						+ " [" + AICargo.GetName(cargo) + "]");
+				} else {
+					HgLog.Warning("FreightNetwork.TryBuildFeeder: builder failed for "
+						+ AIIndustry.GetName(feeder.srcIndustry)
+						+ " [" + AICargo.GetName(cargo) + "], blacklisting");
+				}
+			}
+
+			// Remove all batch entries (reverse order to keep indices valid)
+			for(local i = batchIndices.len() - 1; i >= 0; i--) {
+				FreightNetwork.pendingFeeders.remove(batchIndices[i]);
+			}
+			if(anyBuilt) {
+				FreightNetwork.servedSources.rawset(feeder.srcIndustry, true);
+			}
+			return; // one industry per Step()
 		}
 	}
 
@@ -384,6 +457,7 @@ class FreightNetwork {
 				FreightNetwork.servedDests.rawset(bestCandidate.destId, true);
 				FreightNetwork.servedSources.rawset(bestCandidate.srcId, true);
 				FreightNetwork.state.lastBuiltRoute = newRoutes[0];
+				FreightNetwork.ScanDestFeeders(newRoutes[0]);
 				FreightNetwork.ScanFeeders(newRoutes[0]);
 				HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
 				return true;
