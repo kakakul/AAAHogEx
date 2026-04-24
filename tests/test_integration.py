@@ -75,8 +75,8 @@ def test_spur_connects_via_junction(seed):
 
 
 @pytest.mark.parametrize("seed", [42])
-def test_spine_built_no_idle_processing_crash(seed):
-    """Spine builds correctly with idle-processing-source guard active."""
+def test_spine_built_with_idle_processing_guard_smoke(seed):
+    """Smoke test: idle-processing guard does not prevent spine from building on seed=42."""
     row = run_hognet(network_mode=1, days=365 * 3, seed=seed)
     assert not row['error'], f"AI crashed:\n{row['output']}"
     assert 'FreightNetwork.FindSpine: spine built' in row['output'], (
