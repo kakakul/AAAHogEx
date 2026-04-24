@@ -442,7 +442,7 @@ class FreightNetwork {
 
 				FreightNetwork.state.destIndustry = bestCandidate.destId;
 				FreightNetwork.state.destPlace = destPlace;
-				FreightNetwork.servedDests.rawset(bestCandidate.destId, true);
+				FreightNetwork.servedDests.rawset(bestCandidate.destId, 1);
 				FreightNetwork.servedSources.rawset(bestCandidate.srcId, true);
 				FreightNetwork.state.lastBuiltRoute = newRoutes[0];
 				FreightNetwork.ScanDestFeeders(newRoutes[0]);
@@ -580,6 +580,14 @@ class FreightNetwork {
 		local mapH = AIMap.GetMapSizeY();
 		if(!AIIndustry.IsValidIndustry(FreightNetwork.state.destIndustry)) {
 			HgLog.Warning("FreightNetwork.SearchAndConnect: dest industry closed, aborting");
+			return false;
+		}
+		local destSrcCount = FreightNetwork.servedDests.rawin(FreightNetwork.state.destIndustry)
+			? FreightNetwork.servedDests[FreightNetwork.state.destIndustry] : 0;
+		local maxSources = 12;
+		if(destSrcCount >= maxSources) {
+			HgLog.Info("FreightNetwork.SearchAndConnect: dest already has " + maxSources + " sources, stop connecting more sources");
+			FreightNetwork.availableJunctions.clear();
 			return false;
 		}
 		local destTile = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
@@ -873,6 +881,12 @@ class FreightNetwork {
 					FreightNetwork.ScanFeeders(newRoute);
 					FreightNetwork.servedSources.rawset(found.industry, true);
 					FreightNetwork.availableJunctions.remove(ji);
+
+					// Log total sources connected to destination - used to prevent traffic jams from too many connections
+					local newDestSrcCount = (FreightNetwork.servedDests.rawin(FreightNetwork.state.destIndustry)
+						? FreightNetwork.servedDests[FreightNetwork.state.destIndustry] : 0) + 1;
+					FreightNetwork.servedDests.rawset(FreightNetwork.state.destIndustry, newDestSrcCount);
+
 					// Update lastBuiltRoute so BuildJunctions (called from Step after we
 					// return) places new junctions near this branch station, not on the spine.
 					FreightNetwork.state.lastBuiltRoute = newRoute;
