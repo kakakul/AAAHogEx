@@ -516,6 +516,10 @@ class FreightNetwork {
 		local ai = HogeAI.Get();
 		local mapW = AIMap.GetMapSizeX();
 		local mapH = AIMap.GetMapSizeY();
+		if(!AIIndustry.IsValidIndustry(FreightNetwork.state.destIndustry)) {
+			HgLog.Warning("FreightNetwork.SearchAndConnect: dest industry closed, aborting");
+			return false;
+		}
 		local destTile = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
 		local destType = AIIndustry.GetIndustryType(FreightNetwork.state.destIndustry);
 
