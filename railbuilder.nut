@@ -3314,8 +3314,8 @@ class RightDivergeDiagonalJunction {
 	function GetRequiredTiles() {
 		return [
 			[-2,-1], [-1,-1], [0,-1],
-			  [-1,0], [0,0],   [1,0],  [2,0], [3,0],
-			         [0,1],   [1,1],  [2,1], [3,1],
+			  [-1,0], [0,0],   [1,0],  [2,0], [3,0], [4,0],
+			         [0,1],   [1,1],  [2,1], [3,1], [4,1],
 			                  [1,2],  [2,2], [3,2],
 		];
 	}
@@ -3329,6 +3329,7 @@ class RightDivergeDiagonalJunction {
 			[[1,0],[2,0],[3,0]],
 			[[2,0],[3,0],[4,0]],
 			// Branch inbound (from (3,1)): y=1 row (3,1)->(2,1)->(1,1)->(0,1) then merge to spine
+			[[5,1],[4,1],[3,1]],	//extra tile to minimise level crossing
 			[[4,1],[3,1],[2,1]],
 			[[3,1],[2,1],[1,1]],
 			[[2,1],[1,1],[0,1]]
@@ -3344,7 +3345,7 @@ class RightDivergeDiagonalJunction {
 	}
 
 	function GetInboundBranchPath() {
-		return [At(3,1), At(2,1), At(1,1), At(0,1), At(0,0), At(-1,0)];
+		return [At(4,1), At(3,1), At(2,1), At(1,1), At(0,1), At(0,0), At(-1,0)];
 	}
 
 	function CollectAndRemoveSignals() {

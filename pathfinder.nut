@@ -106,7 +106,7 @@ class RailPathFinder
 		_pathfinder = this._aystar_class(this, this._Cost, this._Estimate, this._Neighbours, this._CheckDirection);
 		_pathfinder.debug = debug;
 	
-		_cost_level_crossing = 900;
+		_cost_level_crossing = 5000;
 		_cost_crossing_reverse = 300;
 		if(isSingle) {
 			_cost_bridge_per_tile_ex = 10;
