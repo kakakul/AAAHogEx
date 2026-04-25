@@ -179,7 +179,8 @@ class FreightNetwork {
 					srcIndustry = indId,
 					branchStationTile = stationTile,
 					cargo = cargo,
-					branchRouteId = branchRoute.id
+					branchRouteId = branchRoute.id,
+					destIndustry = destIndustry
 				});
 				HgLog.Info("FreightNetwork.ScanFeeders: queued feeder "
 					+ AIIndustry.GetName(indId) + " -> " + srcStation.GetName()
@@ -298,6 +299,14 @@ class FreightNetwork {
 			}
 			if(anyBuilt) {
 				FreightNetwork.servedSources.rawset(feeder.srcIndustry, true);
+				local isDestFeeder = feeder.rawin("isDestFeeder") && feeder.isDestFeeder;
+				if(!isDestFeeder && feeder.rawin("destIndustry") && AIIndustry.IsValidIndustry(feeder.destIndustry)) {
+					local prev = FreightNetwork.servedDests.rawin(feeder.destIndustry)
+						? FreightNetwork.servedDests[feeder.destIndustry] : 0;
+					FreightNetwork.servedDests.rawset(feeder.destIndustry, prev + 1);
+					HgLog.Info("FreightNetwork.TryBuildFeeder: servedDests["
+						+ AIIndustry.GetName(feeder.destIndustry) + "]=" + (prev + 1));
+				}
 			}
 			return; // one industry per Step()
 		}
@@ -362,7 +371,7 @@ class FreightNetwork {
 						if(FreightNetwork.failedPairs.rawin(src.id + "-" + destId)) continue;
 						if(FreightNetwork.IsIndustryInTown(src.id) && FreightNetwork.IsIndustryInTown(destId)) continue;
 						local dist = AIMap.DistanceManhattan(src.loc, destLoc);
-						if(dist < 30 || dist >= maxRouteDist) continue;
+						if(dist < 55 || dist >= maxRouteDist) continue;
 
 						if(edgePct < 100) {
 							local pDir = FreightNetwork.GetPrimaryDirection(destLoc, src.loc);
