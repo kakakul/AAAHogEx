@@ -3,3 +3,4 @@ AAAHogEx-original/
 notes.txt
 .claude/
 .vscode/
+.pytest_cache/
