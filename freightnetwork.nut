@@ -587,7 +587,7 @@ class FreightNetwork {
 		}
 		local destSrcCount = FreightNetwork.servedDests.rawin(FreightNetwork.state.destIndustry)
 			? FreightNetwork.servedDests[FreightNetwork.state.destIndustry] : 0;
-		local maxSources = 12;
+		local maxSources = 8;
 		if(destSrcCount >= maxSources) {
 			HgLog.Info("FreightNetwork.SearchAndConnect: dest already has " + maxSources + " sources, stop connecting more sources");
 			FreightNetwork.availableJunctions.clear();
@@ -872,6 +872,8 @@ class FreightNetwork {
 					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
 					newRoute.destDepot = spineRoute.destDepot;
 					newRoute.Initialize();
+					newRoute.pathDistance += spineRoute.pathDistance;	// have to add spineroute distance for correct train length estimation
+					newRoute.saveData.pathDistance = newRoute.pathDistance;
 					newRoute.CalculateUseDepots();
 					TrainRoute.instances.push(newRoute);
 					PlaceDictionary.Get().AddRoute(newRoute);
