@@ -2677,6 +2677,7 @@ class TrainRoute extends Route {
 
 	function GetLostSuppressDays(count) {
 		if(count <= 1) return 365;
+		return 365 * count;
 	}
 
 	function OnVehicleLost(vehicle) {
