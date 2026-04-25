@@ -1960,6 +1960,8 @@ class TrainRoute extends Route {
 		HgLog.Warning("Demolish " + this);
 		local execMode = AIExecMode();
 		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+			// Network mode: leave tracks intact for reuse by other routes.
+			// Only remove stations (if unused by other routes) and depots.
 			foreach(tile in pathSrcToDest.array_) {
 				TrainRoute.RemoveUsedTile(tile);
 			}
@@ -1968,6 +1970,31 @@ class TrainRoute extends Route {
 					TrainRoute.RemoveUsedTile(tile);
 				}
 			}
+			srcHgStation.RemoveIfNotUsed();
+			foreach(station in destHgStations) {
+				station.RemoveIfNotUsed();
+			}
+			foreach(tile,depotInfo in depotInfos) {
+				foreach(depotTile in depotInfo.depots) {
+					AITile.DemolishTile(depotTile);
+				}
+			}
+			local tiles = [];
+			tiles.extend(additionalTiles);
+			foreach(tile in tiles) {
+				if(AIRail.IsRailDepotTile(tile)) {
+					AITile.DemolishTile(tile);
+				}
+			}
+			// Deregister paths without physically removing rails
+			pathSrcToDest.Remove(false/*physicalRemove*/, false/*DoInterval*/);
+			if(pathDestToSrc != null) {
+				pathDestToSrc.Remove(false/*physicalRemove*/, false/*DoInterval*/);
+			}
+			if(returnRoute != null) {
+				returnRoute.Demolish();
+			}
+			return;
 		}
 		srcHgStation.RemoveIfNotUsed();
 		foreach(station in destHgStations) {
@@ -2463,6 +2490,25 @@ class TrainRoute extends Route {
 		}
 		
 		local numVehicles = GetNumVehicles();
+		// Speed check: if average speed of moving vehicles is below 25% of max speed, the route
+		// is congested — adding more trains would make it worse.
+		if(numVehicles >= 3) {
+			local speedSum = 0;
+			local speedCount = 0;
+			foreach(v, _ in GetVehicleList()) {
+				if(AIVehicle.IsInDepot(v)) continue;
+				if(AIVehicle.GetState(v) == AIVehicle.VS_AT_STATION) continue;
+				local maxSpeed = AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(v));
+				if(maxSpeed <= 0) continue;
+				speedSum += AIVehicle.GetCurrentSpeed(v).tofloat() / maxSpeed;
+				speedCount++;
+			}
+			if(speedCount >= 3 && speedSum / speedCount < 0.25) {
+				HgLog.Info("CheckCloneTrain: suppressing clone, avg speed ratio="
+					+ (speedSum / speedCount) + " " + this);
+				return;
+			}
+		}
 		if(IsCloneTrain()) {
 			local numClone = 1;
 			if(latestEngineSet != null) {
@@ -2480,6 +2526,14 @@ class TrainRoute extends Route {
 			local capacity = GetCargoCapacity(cargo);
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null) numClone = min(numClone, maxTrains - numVehicles);
+			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+				numClone = min(numClone, latestEngineSet.vehiclesPerRoute - numVehicles);
+				if(numClone <= 0) {
+					HgLog.Info("CheckCloneTrain: suppressing clone, numVehicles=" + numVehicles
+						+ " >= vehiclesPerRoute=" + latestEngineSet.vehiclesPerRoute + " " + this);
+					return;
+				}
+			}
 			numClone = max(1,min( numClone, waiting / capacity ));
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
 			for(local i=0; i<numClone; i++) {
