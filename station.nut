@@ -1380,7 +1380,9 @@ class RailStationFactory extends StationFactory {
 			platformLength = GetMaxStatoinLength(cargo);
 		}
 		local settingMax = AIGameSettings.GetValue("vehicle.max_train_length");
-		platformLength = min(platformLength, settingMax );
+		local effectiveMax = (HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo))
+			? min(settingMax, 11) : settingMax; // hard cap of 11 tiles for station and train length for freight, as junctions cannot handle longer than that (deadlock)
+		platformLength = min(platformLength, effectiveMax);
 		minPlatformLength = min(minPlatformLength, platformLength);
 		minPlatformLength = min(minPlatformLength, settingMax);
 	
