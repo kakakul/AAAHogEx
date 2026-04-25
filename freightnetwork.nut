@@ -219,7 +219,8 @@ class FreightNetwork {
 					srcIndustry = indId,
 					branchStationTile = stationTile,
 					cargo = cargo,
-					branchRouteId = spineRoute.id
+					branchRouteId = spineRoute.id,
+					isDestFeeder = true
 				});
 				insertPos++;
 				HgLog.Info("FreightNetwork.ScanDestFeeders: queued priority feeder "
@@ -275,7 +276,9 @@ class FreightNetwork {
 			local anyBuilt = false;
 			foreach(cargo in batchCargos) {
 				local src = HgIndustry(feeder.srcIndustry, true);
-				local builder = RoadRouteBuilder(destSg, src, cargo, {});
+				local isDestFeeder = feeder.rawin("isDestFeeder") && feeder.isDestFeeder;
+				local builderOpts = isDestFeeder ? {transfer = false} : {};	// set transfer false, or route builder will give transfer orders instead of unload orders
+				local builder = RoadRouteBuilder(destSg, src, cargo, builderOpts);
 				local route = builder.Build();
 				if(route != null) {
 					anyBuilt = true;
