@@ -4043,13 +4043,13 @@ class FourWayJunction {
 			canonical = [[1,-1],[-1,1]];
 		}
 
-		// Find which side has parallel tiles for all of m0, m1, m2, m3
+		// Find which side has parallel tiles for all tiles in the window (body + 5-tile approach clearance each side)
 		local parallelOffX = null;
 		local parallelOffY = null;
 		for(local si = 0; si < 2; si++) {
 			local offsets = sideOptions[si];
 			local allFound = true;
-			foreach(mt in [m0, m1, m2, m3]) {
+			foreach(mt in [mm5, mm4, mm3, mm2, mm1, m0, m1, m2, m3, m4, m5, m6, m7, m8]) {
 				local found = false;
 				foreach(off in offsets) {
 					local candidate = AIMap.GetTileIndex(
