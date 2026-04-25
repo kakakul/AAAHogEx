@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-18-right-hand-drive-bias.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Add wrong-side penalty to SetReverseNears",
+      "status": "pending",
+      "description": "**Goal:** Wrong-side tiles in `_reverseNears` get their level increased by 3, making the heuristic more expensive for the pathfinder to route on the wrong side.\n\n**Files:**\n- Modify: `pathfinder.nut:346-411`\n\n**Acceptance Criteria:**\n- [ ] `_reverseNears` levels are higher for tiles on the wrong side of `reversePath` than for equidistant tiles on the correct side\n- [ ] Correct-side tiles are unchanged (levels 0–20 as before)\n- [ ] Wrong-side tiles adjacent to the path have level ≥ 3 (were level 2 before)\n- [ ] The change is confined to `SetReverseNears()` — no other methods modified\n\n**Verify:** Reload AI in-game on a new game and observe that double-track sections consistently use one side per direction.\n\n**Steps:** Seed wrongNears during path walk, run wrong-side BFS, post-process _reverseNears with +3 for wrong-side tiles, verify with temp log, commit.\n\n```json:metadata\n{\"files\": [\"pathfinder.nut\"], \"verifyCommand\": \"Load AI in OpenTTD, check debug log for no errors and correct level values\", \"acceptanceCriteria\": [\"_reverseNears levels higher for wrong-side tiles\", \"Correct-side tiles unchanged (0-20)\", \"Wrong-side adjacent tiles have level >= 3\", \"Change confined to SetReverseNears\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-18T00:00:00Z"
+}

@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-24-skip-idle-processing-sources.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Guard idle processing sources in FindSpine and ScanFeeders",
+      "status": "completed",
+      "description": "**Goal:** Add type-aware production checks so processing industry sources with 0 output are skipped in both `FindSpine` and `ScanFeeders`, with a log line for each skip.\n\n**Files:**\n- Modify: `freightnetwork.nut:302-303`\n- Modify: `freightnetwork.nut:169`\n- Test: `tests/test_integration.py`\n\n**Acceptance Criteria:**\n- [ ] Processing industry sources with 0 output skipped in FindSpine\n- [ ] Processing industry sources with 0 output skipped in ScanFeeders\n- [ ] Primary industry floor of 80 preserved in FindSpine\n- [ ] Log line emitted when a processing source is skipped\n- [ ] No crash; spine still builds on seed=42\n\n**Verify:** `cd tests && pytest test_integration.py -v` → all tests pass\n\n```json:metadata\n{\"files\": [\"freightnetwork.nut\", \"tests/test_integration.py\"], \"verifyCommand\": \"cd tests && pytest test_integration.py -v\", \"acceptanceCriteria\": [\"Processing industry sources with 0 output skipped in FindSpine\", \"Processing industry sources with 0 output skipped in ScanFeeders\", \"Primary industry floor of 80 preserved\", \"Log line emitted on skip\", \"No crash, spine builds on seed=42\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-24T12:00:00Z"
+}

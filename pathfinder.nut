@@ -106,7 +106,7 @@ class RailPathFinder
 		_pathfinder = this._aystar_class(this, this._Cost, this._Estimate, this._Neighbours, this._CheckDirection);
 		_pathfinder.debug = debug;
 	
-		_cost_level_crossing = 900;
+		_cost_level_crossing = 5000;
 		_cost_crossing_reverse = 300;
 		if(isSingle) {
 			_cost_bridge_per_tile_ex = 10;
@@ -351,6 +351,7 @@ class RailPathFinder
 	
 		
 		local nears = {};
+		local wrongSide = {};
 		_reverseNears = {};
 		_reverseTiles = {};
 		
@@ -376,16 +377,17 @@ class RailPathFinder
 						for(local i=0; i<d; i++) {
 							nears.rawset(tile + i * offset + revDir,0);
 							_reverseNears.rawset(tile + i * offset + revDir,0)
-							//DebugSign(tile + i * offset + revDir,"0");
+							if(!wrongSide.rawin(tile + i * offset - revDir))
+								wrongSide.rawset(tile + i * offset - revDir,0);
 						}
 					} else {
 						nears.rawset(tile + revDir,0);
 						_reverseNears.rawset(tile + revDir,0);
-						//DebugSign(tile + revDir,"0");
+						if(!wrongSide.rawin(tile - revDir))
+							wrongSide.rawset(tile - revDir,0);
 						if(prevprev != null && AIMap.DistanceManhattan(prevprev,prev)==1 && prev == prevprev + revDir) {
 							nears.rawset(prev,0);
 							_reverseNears.rawset(prev,0);
-							//DebugSign(prev,"0");
 						}
 					}
 				}
@@ -401,11 +403,41 @@ class RailPathFinder
 					if(!_reverseNears.rawin(tile+d)) {
 						next.rawset(tile+d ,i)
 						_reverseNears.rawset(tile+d ,i)
-						//DebugSign(tile+d,i.tostring());
 					}
 				}
 			}
 			nears = next;
+		}
+
+		// Build wrong-side BFS (raw distances, no offset yet)
+		local wrongBFS = {};
+		foreach(t, _ in wrongSide) {
+			wrongBFS.rawset(t, 0);
+		}
+		local wrongFrontier = wrongSide;
+		for(local i=1; i<20; i++) {
+			local next = {};
+			foreach(t, _ in wrongFrontier) {
+				foreach(d in HgTile.DIR4Index) {
+					if(!wrongBFS.rawin(t+d)) {
+						next.rawset(t+d, i);
+						wrongBFS.rawset(t+d, i);
+					}
+				}
+			}
+			wrongFrontier = next;
+		}
+
+		// Penalise wrong-side tiles: if wrong BFS reached this tile closer than
+		// correct BFS, the tile is on the wrong side — raise its level by 3.
+		foreach(t, wrongDist in wrongBFS) {
+			if(_reverseNears.rawin(t)) {
+				if(wrongDist < _reverseNears[t]) {
+					_reverseNears[t] = _reverseNears[t] + 3;
+				}
+			} else {
+				_reverseNears.rawset(t, wrongDist + 3);
+			}
 		}
 
 	}

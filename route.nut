@@ -1830,16 +1830,16 @@ class CommonRoute extends Route {
 		local latestEngineSet = GetLatestEngineSet();
 		if(vehicleList.Count() <= 2 || latestEngineSet == null) return;
 
-		// Primary check: if average cargo load across all vehicles is below 50%, the route has too
+		// Primary check: if average cargo load across all vehicles is below 25%, the route has too
 		// many vehicles. Support/feeder routes are bidirectional so natural avg is ~50% (loaded
-		// one way, empty return); below 50% means over-staffed.
+		// one way, empty return); below 25% means over-staffed.
 		local totalLoad = 0;
 		local totalCapacity = 0;
 		foreach(v,_ in vehicleList) {
 			totalLoad += AIVehicle.GetCargoLoad(v, cargo);
 			totalCapacity += AIVehicle.GetCapacity(v, cargo);
 		}
-		if(totalCapacity > 0 && totalLoad * 2 < totalCapacity) {
+		if(totalCapacity > 0 && totalLoad * 4 < totalCapacity) {
 			HgLog.Warning("ReduceVehiclesToHalf (support low avg load "+totalLoad+"/"+totalCapacity+") maxVehicles:"+maxVehicles+" "+this);
 				ReduceVehiclesToHalf();
 			return;
@@ -3647,6 +3647,7 @@ class RouteBuilder extends Construction {
 	}
 	
 	function _DoPostBuild(builtRoute) {
+		if(HogeAI.Get().IsNetworkMode()) return;
 		local engineSet = builtRoute.GetLatestEngineSet();
 		if( engineSet == null ) {
 			HgLog.Info("engineSet == null "+builtRoute);

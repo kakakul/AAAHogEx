@@ -9,6 +9,7 @@ require("estimator.nut");
 require("route.nut");
 require("trainroute.nut");
 require("railbuilder.nut");
+require("freightnetwork.nut");
 require("road.nut");
 require("water.nut");
 require("air.nut");
@@ -267,8 +268,7 @@ class HogeAI extends AIController {
 		SetCompanyName();
 		HgLog.Info("HogNet Started! version:"+HogeAI.version+" name:"+AICompany.GetName(AICompany.COMPANY_SELF));
 		HgLog.Info("openttd version:"+openttdVersion);
-		
-		
+
 		/*
 		foreach(town,_ in AITownList()) {
 			local s = []
@@ -749,7 +749,7 @@ class HogeAI extends AIController {
 			prevLoadAmount = currentLoanAmount;
 			currentLoanAmount = AICompany.GetLoanAmount();
 			ResetEstimateTable();
-			while(indexPointer < (IsNetworkMode() ? 5 : 4)) {
+			while(indexPointer < (IsNetworkMode() ? 6 : 4)) {
 				UpdateSettings();
 				limitDate = AIDate.GetCurrentDate() + 600;
 				Place.canBuildAirportCache.clear();
@@ -851,6 +851,9 @@ class HogeAI extends AIController {
 				break;
 			case 4:
 				if(IsNetworkMode()) ConnectUnservedTowns();
+				break;
+			case 5:
+				if(IsNetworkMode()) FreightNetwork.Step();
 				break;
 		}
 	}
@@ -1155,7 +1158,8 @@ class HogeAI extends AIController {
 
 	function _ScanPlaces() {
 		HgLog.Info("###### Scan places");
-		
+		if(IsNetworkMode()) return;
+
 		if(/*IsForceToHandleFright() &&*/ isTimeoutToMeetSrcDemand) { // Airやるだけなら良いが、余計なルートを作ってsupply chainを混乱させる事があったのでコメントアウト
 			return;
 		}
@@ -1484,6 +1488,7 @@ class HogeAI extends AIController {
 				destRoute==null && t.estimate.destRouteCargoIncome == 0 && t.estimate.additionalRouteIncome == 0
 			estimate = t.estimate
 			limitDate = limitDate
+		notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
 		});
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);
@@ -4046,6 +4051,7 @@ class HogeAI extends AIController {
 		}
 		list.Sort(AIList.SORT_BY_VALUE,true);
 		foreach(index,_ in list) {
+			routes[index].CheckClose();
 			routes[index].CheckBuildVehicle();
 			routes[index].CheckRenewal();
 		}
@@ -4393,6 +4399,11 @@ class HogeAI extends AIController {
 		HgLog.Info("TrainRoute.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
 		remainOps = AIController.GetOpsTillSuspend();
 
+		FreightNetwork.SaveStatics(table);
+
+		HgLog.Info("FreightNetwork.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
+		remainOps = AIController.GetOpsTillSuspend();
+
 		CommonRoute.SaveStatics(table);
 		RoadRoute.SaveStatics(table);		
 
@@ -4476,7 +4487,8 @@ class HogeAI extends AIController {
 		Place.LoadStatics(loadData);
 		HgStation.LoadStatics(loadData);
 		TrainInfoDictionary.LoadStatics(loadData);
-		TrainRoute.LoadStatics(loadData);		
+		TrainRoute.LoadStatics(loadData);
+		FreightNetwork.LoadStatics(loadData);
 		CommonRoute.LoadStatics(loadData);
 		RoadRoute.LoadStatics(loadData);
 		WaterRoute.LoadStatics(loadData);
@@ -4842,6 +4854,7 @@ class HogeAI extends AIController {
 		}
 		HgLog.Info("}");
 	}
+
 }
 
 class RouteCandidates {

@@ -3153,3 +3153,924 @@ class RailRemover extends Construction {
 }
 
 Construction.nameClass.RailRemover <- RailRemover;
+
+
+class RightDivergeDiagonalJunction {
+	/*
+	Layout (flipY=false, flipX=false, rotate=false) (S for signal placement and arrows for direction of travel):
+	Layout (NE→SW spine, branch towards West)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:  (3,0,←)    (2,0,←)    (1,0,←↙)   (0,0,↙↗)  (-1,0,↗)
+	y=+1:  (3,1,→S)   (2,1,→↙)   (1,1,↙→↗)  (0,1,↗)
+	y=+2:  (3,2,↙)    (2,2,↙↗S)  (1,2,↗)
+
+	Layout (S for signal placement and arrows for direction of travel):
+	Layout (NE→SW spine, branch towards South)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:                        (1,0,↙)    (0,0,↙↗)  (-1,0,↗)
+	y=+1:             (2,1,↙)   (1,1,↙↓↗)  (0,1,↗↑)
+	y=+2:  (3,2,↙)   (2,2,↙↗S)  (1,2,↗↓)   (0,2,↑S)
+
+	Layout (S for signal placement and arrows for direction of travel):
+	Layout (SW→NE spine, branch towards East)
+			x=3        x=2        x=1        x=0         x=-1        x=-2
+	y=-1:                                   (0,-1,↙S)   (-1,-1,↙↗)  (-2,-1,↗)
+	y= 0:                        (1,0,↙)    (0,0,↙←↗)  (-1,0,↗←)    (-2,0,←S)
+	y=+1:             (2,1,↙)   (1,1,↙↗)  (0,1,↗→)    (-1,1,→)     (-2,1,→)
+	y=+2:  (3,2,↙)   (2,2,↙↗S)  (1,2,↗)
+
+	Layout (S for signal placement and arrows for direction of travel):
+	Layout (SE→NW spine, branch towards West)
+			x=3        x=2        x=1        x=0         x=-1        x=-2        x=-3
+	y=-1:            (2,-1,↘)  (1,-1,S↘↖)   (0,-1,↖)
+	y= 0:             (2,0,←)   (1,0,←↘)    (0,0,↘←↖)  (-1,0,↖)
+	y=+1:             (2,1,→)    (1,1,→S)    (0,1,↘→)  (-1,1,↘↖)  (-2,1,↖)
+	y=+2:                                               (-1,2,↘)   (-2,2,↘↖S) (-3,2,↖)
+
+	// | Spine | Direction | Junction | transpose | flipX | flipY | offset
+	// | ----- | --------- | -------- | --------- | ----- | ----- | ------
+	// | NE→SW | →         | Right    | false     | false | false | (0,0)
+	// | NE→SW | →         | Left     | true      | false | false | (0,0)
+	// | NE→SW | ←         | Right    | false     | true  | false | (1,0)
+	// | NE→SW | ←         | Left     | true      | false | true  | (0,1)
+	// | NW→SE | →         | Right    | true      | false | false | (0,-1)
+	// | NW→SE | →         | Left     | false     | true  | true  | (0,1)
+	// | NW→SE | ←         | Right    | true      | false | true  | (-1,1)
+	// | NW→SE | ←         | Left     | false     | false | false | (-1,0)
+	*/
+
+	originTile = null;
+	flipX = null;
+	flipY = null;
+	transpose = null;
+
+	constructor(tile, isNESW = true, isHeadingSouth = true, side = "right") {
+		// Lookup table: isNESW=true→NE→SW spine, isHeadingSouth=true→ direction, side="right"/"left"
+		local isRight = (side == "right");
+		if(isNESW) {
+			this.transpose = !isRight;
+			this.flipX     = !isHeadingSouth && isRight;
+			this.flipY     = !isHeadingSouth && !isRight;
+		} else {
+			this.transpose = isRight;
+			this.flipX     = isHeadingSouth && !isRight;
+			this.flipY     = isRight ? !isHeadingSouth : isHeadingSouth;
+		}
+		// Origin offset lookup table, indexed by [isNESW][isHeadingSouth ? 0 : 2][isRight ? 0 : 1]:
+		// NE→SW: →Right=(0,0)  →Left=(0,0)  ←Right=(1,0)  ←Left=(0,1)
+		// NW→SE: →Right=(0,-1) →Left=(0,1)  ←Right=(-1,1) ←Left=(-1,0)
+		local offTable = [
+			[[0,0],[0,0],[1,0],[0,1]],   // isNESW=true:  [→R, →L, ←R, ←L]
+			[[0,-1],[0,1],[-1,1],[-1,0]] // isNESW=false: [→R, →L, ←R, ←L]
+		];
+		local off = offTable[isNESW ? 0 : 1][(isHeadingSouth ? 0 : 2) + (isRight ? 0 : 1)];
+		this.originTile = AIMap.GetTileIndex(AIMap.GetTileX(tile) + off[0], AIMap.GetTileY(tile) + off[1]);
+	}
+
+	function Transform(x, y) {
+		local tx = transpose ? y : x;
+		local ty = transpose ? x : y;
+		local fx = flipX ? -tx : tx;
+		local fy = flipY ? -ty : ty;
+		return [fx, fy];
+	}
+
+	function TransformDir(dx, dy) {
+		local tx = transpose ? dy : dx;
+		local ty = transpose ? dx : dy;
+		local fx = flipX ? -tx : tx;
+		local fy = flipY ? -ty : ty;
+		return [fx, fy];
+	}
+
+	function At(x, y) {
+		local t = Transform(x, y);
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + t[0],
+			AIMap.GetTileY(originTile) + t[1]);
+	}
+
+	function AtSignal(x, y) {
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + x,
+			AIMap.GetTileY(originTile) + y);
+	}
+
+	// function BuildSignals(x, y, dx, dy, pbs) {
+	// 	local signalTile = At(x, y);
+	// 	local d = TransformDir(dx, dy);
+	// 	local neighborTile = AIMap.GetTileIndex(
+	// 		AIMap.GetTileX(signalTile) + d[0],
+	// 		AIMap.GetTileY(signalTile) + d[1]);
+	// 	BuildUtils.BuildSignalSafe(signalTile, neighborTile, pbs);
+	// }
+
+	function BuildSignals(x, y, dx, dy, pbs) {
+		// local signalTile = At(x, y);
+
+		// local d = TransformDir(dx, dy);
+
+		// // Detect handedness flip if odd number of reflections
+		// local reflections = (transpose ? 1 : 0) + (flipX ? 1 : 0) + (flipY ? 1 : 0);
+		// if (reflections % 2 == 1) {
+		// 	d[0] = -d[0];
+		// 	d[1] = -d[1];
+		// }
+
+		// local neighborTile = AIMap.GetTileIndex(
+		// 	AIMap.GetTileX(signalTile) + d[0],
+		// 	AIMap.GetTileY(signalTile) + d[1]);
+
+		// BuildUtils.BuildSignalSafe(signalTile, neighborTile, pbs);
+
+		// Transform position
+		local t  = Transform(x, y);
+		local fx = t[0];
+		local fy = t[1];
+		// Transform direction
+		local d  = TransformDir(dx, dy);
+		local fdx = d[0];
+		local fdy = d[1];
+		// Previous tile = one step opposite direction of travel
+		local px = fx + fdx;
+		local py = fy + fdy;
+		// Fix track handedness: correct when an odd number of reflections are active
+		// (rotate, flipX, flipY are each reflections; odd count flips chirality)
+		local reflections = (transpose ? 1 : 0) + (flipX ? 1 : 0) + (flipY ? 1 : 0);
+		if (reflections % 2 == 1) {
+			local nx = -fdy;
+			local ny =  fdx;
+			fx += nx;
+			fy += ny;
+			px += nx;
+			py += ny;
+		}
+
+		BuildUtils.BuildSignalSafe(AtSignal(fx,fy), AtSignal(px,py), pbs);
+	}
+
+	function GetRequiredTiles() {
+		return [
+			[-2,-1], [-1,-1], [0,-1],
+			  [-1,0], [0,0],   [1,0],  [2,0], [3,0], [4,0],
+			         [0,1],   [1,1],  [2,1], [3,1], [4,1],
+			                  [1,2],  [2,2], [3,2],
+		];
+	}
+
+	function GetRails() {
+		// Every triple [a,b,c] must have a,c each Manhattan-1 from b.
+		// The diagonal spine is a zig-zag: (-2,-1)→(-1,-1)→(0,-1)→(0,0)→(1,0)→(1,1)→(2,1)→(2,2)→(3,2).
+		return [
+			// Outbound path: (0,0)->(1,0)->(2,0)->(3,0)  (y=0 row)
+			[[0,0],[1,0],[2,0]],
+			[[1,0],[2,0],[3,0]],
+			[[2,0],[3,0],[4,0]],
+			// Branch inbound (from (3,1)): y=1 row (3,1)->(2,1)->(1,1)->(0,1) then merge to spine
+			[[5,1],[4,1],[3,1]],	//extra tile to minimise level crossing
+			[[4,1],[3,1],[2,1]],
+			[[3,1],[2,1],[1,1]],
+			[[2,1],[1,1],[0,1]]
+		];
+	}
+
+	function GetBranchEndTile() {
+		return At(3, 0);
+	}
+
+	function GetBranchPath() {
+		return [At(3,0), At(2,0), At(1,0), At(0,0), At(0,-1), At(-1,-1)];
+	}
+
+	function GetInboundBranchPath() {
+		return [At(4,1), At(3,1), At(2,1), At(1,1), At(0,1), At(0,0), At(-1,0)];
+	}
+
+	function CollectAndRemoveSignals() {
+		local mapW = AIMap.GetMapSizeX();
+		local saved = [];
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!AIRail.IsRailTile(t)) continue;
+			local neighbors = [
+				t - 1, t + 1, t - mapW, t + mapW,
+				t - mapW - 1, t - mapW + 1, t + mapW - 1, t + mapW + 1
+			];
+			foreach(nb in neighbors) {
+				if(!AIMap.IsValidTile(nb)) continue;
+				local stype = AIRail.GetSignalType(t, nb);
+				if(stype != AIRail.SIGNALTYPE_NONE) {
+					HgLog.Info("RightDivergeDiagonalJunction: removing signal at " + HgTile(t)
+						+ " facing " + HgTile(nb) + " type=" + stype);
+					saved.push([t, nb, stype]);
+					BuildUtils.RemoveSignalSafe(t, nb);
+				}
+			}
+		}
+		return saved;
+	}
+
+	function RestoreSignals(saved) {
+		foreach(sig in saved) {
+			HgLog.Info("RightDivergeDiagonalJunction: restoring signal at " + HgTile(sig[0])
+				+ " facing " + HgTile(sig[1]) + " type=" + sig[2]);
+			BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
+		}
+	}
+
+	function Build(isTestMode = true) {
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
+				HgLog.Info("RightDivergeDiagonalJunction.Build: blocked at ["
+					+ xy[0] + "," + xy[1] + "] " + HgTile(t)
+					+ (isTestMode ? " (test)" : " (real)"));
+				return false;
+			}
+		}
+		if(isTestMode) return true;
+
+		// Level every required tile to the same height as the junction origin.
+		local allTiles = [];
+		foreach(xy in GetRequiredTiles()) {
+			allTiles.push(At(xy[0], xy[1]));
+		}
+		local tileList = TileListUtils.GetLevelTileList(allTiles);
+		tileList.Valuate(AITile.GetCornerHeight, AITile.CORNER_N);
+		local trackHeight = AITile.GetMinHeight(At(0, 0));
+		local levelTrack = transpose ? AIRail.RAILTRACK_NE_SW : AIRail.RAILTRACK_NW_SE;
+		if(!TileListUtils.LevelAverage(tileList, levelTrack, false, trackHeight, true)) {
+			HgLog.Warning("RightDivergeDiagonalJunction.Build: LevelTiles failed");
+			return false;
+		}
+
+		local savedSignals = CollectAndRemoveSignals();
+		local builtRails = [];
+
+		foreach(r in GetRails()) {
+			local a = At(r[0][0], r[0][1]);
+			local b = At(r[1][0], r[1][1]);
+			local c = At(r[2][0], r[2][1]);
+			if(RailBuilder.BuildRailSafe(a, b, c)) {
+				builtRails.push([a, b, c]);
+			} else if(AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) {
+				HgLog.Info("RightDivergeDiagonalJunction.Build: already built at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b) + " (ok)");
+			} else {
+				HgLog.Warning("RightDivergeDiagonalJunction.Build: rail failed at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b)
+					+ " err=" + AIError.GetLastErrorString());
+				foreach(built in builtRails) {
+					AIRail.RemoveRail(built[0], built[1], built[2]);
+				}
+				RestoreSignals(savedSignals);
+				return false;
+			}
+		}
+
+		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		// BuildSignals(0, -1, 0, -1, pbs); // Spine SW-bound signal at (0,-1), train continues toward (0,0). TODO: Signals not being placed correctly
+		// BuildSignals(2, 2, 1, 0, pbsh); // Spine NE-bound signal at (2,2), train continues toward (1,2). TODO: Signals not being placed correctly
+		BuildSignals(3, 1, 1, 0, pbs); // Branch inbound signal at (3,1), train continues toward (2,1). Inverted direction
+
+		HgLog.Info("RightDivergeDiagonalJunction: built at origin " + HgTile(originTile)
+			+ " flipY=" + flipY + " flipX=" + flipX + " transpose=" + transpose);
+		return true;
+	}
+}
+
+
+class RightDivergeJunction {
+	/*
+	Double-track main line running north-south splits into a double-track branch going south-west.
+	flipY=false, flipX=false: main approaches from NORTH (station is north, route goes south, branch goes towards the West).
+	flipY=true:  main approaches from SOUTH (branch goes towards the West).
+	flipY=true, flipX=true: main approaches from SOUTH (branch goes towards the East).
+
+	Layout (flipY=false, flipX=false) (S for signal placement and arrows for direction of travel):
+	        x=3       x=2      x=1      x=0
+	y=-2:                    (1,-2,↓)  (0,-2,↑)
+	y=-1:                    (1,-1,S↓) (0,-1,↑)
+	y= 0:           (2,0,↙)  (1,0,↙↓↗) (0,0,↗↑)
+	y=+1: (3,1,↙)  (2,1,↙↗S) (1,1,↗↓)  (0,1,↑)
+	y=+2:                     (1,2,↓)   (0,2,↑S)
+
+	Layout (flipY=false, flipX=true) (S for signal placement and arrows for direction of travel):
+	        x=1       x=0      x=-1     x=-2
+	y=-2:  (1,-2,↑)  (0,-2,↓)
+	y=-1:  (1,-1,↑)  (0,-1,S↓)
+	y= 0:  (1,0,↖↑) (0,0,↘↓↖) (-1,0,↘)
+	y=+1:  (1,1,↑)   (0,1,↖↓) (-1,1,↘↖S) (-2,1,↘)
+	y=+2:  (1,2,↑S)  (0,2,↓)
+
+	Layout (flipY=true, flipX=false) (S for signal placement and arrows for direction of travel):
+	        x=3       x=2      x=1      x=0
+	y=-2:                     (1,-2,↑)   (0,-2,↓S)
+	y=-1: (3,-1,↖)  (2,-1,↖↘S) (1,-1,↘↑) (0,-1,↓)
+	y= 0:           (2,0,↖)   (1,0,↖↑↘) (0,0,↘↓)
+	y=+1:                     (1,1,S↑)  (0,1,↓)
+	y=+2:                     (1,2,↑)   (0,2,↓)
+	*/
+
+	originTile = null; // tile (0,0)
+	flipY = null;
+	flipX = null;
+	rotate = null;
+
+	constructor(tile, flipY_ = false, flipX_ = false, rotate_ = false) {
+		this.originTile = tile;
+		this.flipY = flipY_;
+		this.flipX = flipX_;
+		this.rotate = rotate_;
+	}
+
+	function GetBranchEndTile() {
+		// The outer end of the diagonal branch is at junction-local (3,1).
+		// At() applies flipX/flipY/rotate so this is correct for all orientations.
+		return At(3, 1);
+	}
+
+	function GetBranchPath() {
+		// Outbound branch arm: trains LEAVE spine to go to spur.
+		// Chain: At(1,-1)→At(1,0)→At(2,0)→At(2,1)→At(3,1) connects x=1 spine track to branch.
+		// At(1,-1) is the deepest spine tile (x=1 track).
+		// GetStartArray needs >= 5 tiles; stored outermost-first so PathToStation.Reverse() works.
+		return [At(3, 1), At(2, 1), At(2, 0), At(1, 0), At(1, -1)];
+	}
+
+	function GetInboundBranchPath() {
+		// Inbound branch arm: trains come FROM spur and MERGE INTO spine.
+		// Chain: At(2,2)→At(2,1)→At(1,1)→At(1,0)→At(0,0)→At(0,-1) connects branch to x=0 spine.
+		// At(0,-1) is the deepest spine tile (x=0 track).
+		// 6 tiles: GetStartArray yields starts at At(1,1) and At(2,1) after reversal.
+		return [At(2, 2), At(2, 1), At(1, 1), At(1, 0), At(0, 0), At(0, -1)];
+	}
+
+	function Transform(x, y) {
+		// For N-S: world_x = f(x_junction), world_y = f(y_junction)
+		//   across-track axis = x  →  +1 correction lives in fx
+		// For E-W (rotate): world_x = f(y_junction), world_y = f(x_junction)
+		//   across-track axis = x, but it maps to world_y  →  +1 correction moves to fy
+		local fx = rotate ? (flipY ? (-y)     : y)
+		                  : (flipX ? (-x + 1) : x);
+		local fy = rotate ? (flipX ? (-x + 1) : x)
+		                  : (flipY ? (-y)      : y);
+		return [fx, fy];
+	}
+
+	function TransformDir(dx, dy) {
+		// Same axis swap as Transform, but no +1 (directions are not translated)
+		local fdx = rotate ? (flipY ? (-dy) : dy)
+		                   : (flipX ? (-dx) : dx);
+		local fdy = rotate ? (flipX ? (-dx) : dx)
+		                   : (flipY ? (-dy) : dy);
+		return [fdx, fdy];
+	}
+
+	function At(x, y) {
+		local t = Transform(x, y);
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + t[0],
+			AIMap.GetTileY(originTile) + t[1]);
+	}
+
+	function AtSignal(x, y) {
+		return AIMap.GetTileIndex(
+			AIMap.GetTileX(originTile) + x,
+			AIMap.GetTileY(originTile) + y);
+	}
+
+	function BuildSignals(x, y, dx, dy, pbs) {
+		// Transform position
+		local t  = Transform(x, y);
+		local fx = t[0];
+		local fy = t[1];
+		// Transform direction
+		local d  = TransformDir(dx, dy);
+		local fdx = d[0];
+		local fdy = d[1];
+		// Previous tile = one step opposite direction of travel
+		local px = fx + fdx;
+		local py = fy + fdy;
+		// Fix track handedness: correct when an odd number of reflections are active
+		// (rotate, flipX, flipY are each reflections; odd count flips chirality)
+		local reflections = (rotate ? 1 : 0) + (flipX ? 1 : 0) + (flipY ? 1 : 0);
+		if (reflections % 2 == 1) {
+			local nx = -fdy;
+			local ny =  fdx;
+			fx += nx;
+			fy += ny;
+			px += nx;
+			py += ny;
+		}
+
+		BuildUtils.BuildSignalSafe(AtSignal(fx,fy), AtSignal(px,py), pbs);
+	}
+
+	// Returns [prev,cur,next] triples for AIRail.BuildRail.
+	// Every triple uses only adjacent (Manhattan distance=1) tiles.
+	function GetRails() {
+		return [
+			// Branch merging in from the west to go northbound on mainline
+			[[0,-1],[0,0],[1,0]],
+			[[0,0],[1,0],[1,1]],
+			[[1,0],[1,1],[2,1]],
+			[[1,1],[2,1],[2,2]],
+			// Branching out towards west from southbound mainline
+			[[1,-1],[1,0],[2,0]],
+			[[1,0],[2,0],[2,1]],
+			[[2,0],[2,1],[3,1]],
+			[[2,1],[3,1],[3,2]],
+		];
+	}
+
+	function GetRequiredTiles() {
+		return [
+			[0,-2],[0,-1],[0,0],[0,1],[0,2],
+			[1,-2],[1,-1],[1,0],[1,1],[1,2],
+			[2,0],[2,1],[2,2],
+			[3,1],[3,2],
+		];
+	}
+
+	// Collect all signals on junction tiles, remove them, return saved state.
+	// Because OpenTTD won't add a new track direction to a signaled tile.
+	function CollectAndRemoveSignals() {
+		local mapW = AIMap.GetMapSizeX();
+		local saved = [];
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!AIRail.IsRailTile(t)) continue;
+			local neighbors = [t + 1, t - 1, t + mapW, t - mapW];
+			foreach(nb in neighbors) {
+				if(!AIMap.IsValidTile(nb)) continue;
+				local stype = AIRail.GetSignalType(t, nb);
+				if(stype != AIRail.SIGNALTYPE_NONE) {
+					HgLog.Info("RightDivergeJunction: removing signal at " + HgTile(t)
+						+ " facing " + HgTile(nb) + " type=" + stype);
+					saved.push([t, nb, stype]);
+					BuildUtils.RemoveSignalSafe(t, nb);
+				}
+			}
+		}
+		return saved;
+	}
+
+	function RestoreSignals(saved) {
+		foreach(sig in saved) {
+			HgLog.Info("RightDivergeJunction: restoring signal at " + HgTile(sig[0])
+				+ " facing " + HgTile(sig[1]) + " type=" + sig[2]);
+			BuildUtils.BuildSignalSafe(sig[0], sig[1], sig[2]);
+		}
+	}
+
+	function Build(isTestMode = true) {
+		foreach(xy in GetRequiredTiles()) {
+			local t = At(xy[0], xy[1]);
+			if(!HogeAI.IsBuildable(t) && !AIRail.IsRailTile(t)) {
+				HgLog.Info("RightDivergeJunction.Build: blocked at [" + xy[0] + "," + xy[1]
+					+ "] " + HgTile(t) + (isTestMode ? " (test)" : " (real)"));
+				return false;
+			}
+		}
+
+		if(isTestMode) return true;
+
+		local branchTiles = [
+			At( 1, 1), At( 2, 1), At( 2, 2),
+			At( 2, 0), At( 3, 1), At( 3, 2)
+		];
+		local tileList = TileListUtils.GetLevelTileList(branchTiles);
+		tileList.Valuate(AITile.GetCornerHeight, AITile.CORNER_N);
+		local trackHeight = AITile.GetMinHeight(At(0, 0));
+		if(!TileListUtils.LevelAverage(tileList, AIRail.RAILTRACK_NW_SE, false, trackHeight)) {
+			HgLog.Warning("RightDivergeJunction.Build: LevelTiles failed");
+			return false;
+		}
+
+		local savedSignals = CollectAndRemoveSignals();
+		local builtRails = [];
+
+		foreach(r in GetRails()) {
+			local a = At(r[0][0], r[0][1]);
+			local b = At(r[1][0], r[1][1]);
+			local c = At(r[2][0], r[2][1]);
+			if(RailBuilder.BuildRailSafe(a, b, c)) {
+				builtRails.push([a, b, c]);
+			} else if(AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) {
+				HgLog.Info("RightDivergeJunction.Build: already built at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b) + " (ok)");
+			} else {
+				HgLog.Warning("RightDivergeJunction.Build: rail failed at ["
+					+ r[1][0] + "," + r[1][1] + "] " + HgTile(b)
+					+ " (from " + HgTile(a) + " to " + HgTile(c) + ")"
+					+ " err=" + AIError.GetLastErrorString());
+				foreach(built in builtRails) {
+					AIRail.RemoveRail(built[0], built[1], built[2]);
+				}
+				RestoreSignals(savedSignals);
+				return false;
+			}
+		}
+
+		// Add signals to junction
+		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		BuildSignals(0,2, 0,1, pbs); // Signal on mainline heading north
+		BuildSignals(1,-1, 0,-1, pbs); // Signal on mainline heading south
+		BuildSignals(2,1, 0,1, pbs); // Signal on branch from the west merging into mainline
+
+		HgLog.Info("RightDivergeJunction: signals placed at origin " + HgTile(originTile)
+			+ " flipY=" + flipY + " flipX=" + flipX);
+		return true;
+	}
+}
+
+// FourWayJunction: finds valid locations on the main line and builds
+// a LeftDivergeJunction and RightDivergeJunction independently at each.
+// The two junction types can succeed or fail independently at a given location.
+class FourWayJunction {
+	// Scan mainTiles[minDist..maxDist] for a 5-tile window that is:
+	//   (a) straight N-S with consistent direction across all 5 tiles, and
+	//   (b) running side-by-side with parallelTiles at a consistent x-offset,
+	//   (c) all 5 main+parallel tiles at the same height.
+	// At each valid location, attempts to build both a LeftDivergeJunction and a
+	// RightDivergeJunction. Each is tried independently; either may succeed or fail.
+	// Returns {leftTile, rightTile}: tile integers for each built junction branch end, or -1 if not built.
+	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist, nearSrc = true) {
+		local p2Set = {};
+		foreach(t in parallelTiles) p2Set.rawset(t, true);
+		local tried = 0;
+		local leftTile = -1;
+		local rightTile = -1;
+		local leftPath = null;
+		local rightPath = null;
+		local leftInboundPath = null;
+		local rightInboundPath = null;
+
+		// Need i-2, i-1, i, i+1, i+2 all valid.
+		for(local i = minDist; i <= maxDist && i + 3 < mainTiles.len(); i++) {
+			if(i < 2) continue;
+			if(leftTile != -1 && rightTile != -1) break;
+			local mm1 = mainTiles[i - 2];
+			local m0 = mainTiles[i - 1];
+			local m1 = mainTiles[i];
+			local m2 = mainTiles[i + 1];
+			local m3 = mainTiles[i + 2];
+			local m4 = mainTiles[i + 3];
+
+			// --- Try N-S to find straight track ---
+			local isNS = true;
+			local dy = AIMap.GetTileY(m1) - AIMap.GetTileY(m0);
+			if(AIMap.GetTileX(m1) != AIMap.GetTileX(m0)) isNS = false;
+			if(dy == 0) isNS = false;
+			if(AIMap.GetTileX(mm1) != AIMap.GetTileX(m0)) isNS = false;
+			if(AIMap.GetTileY(mm1) - AIMap.GetTileY(m0) != -dy) isNS = false;
+			if(AIMap.GetTileX(m2) != AIMap.GetTileX(m1)) isNS = false;
+			if(AIMap.GetTileY(m2) - AIMap.GetTileY(m1) != dy) isNS = false;
+			if(AIMap.GetTileX(m3) != AIMap.GetTileX(m2)) isNS = false;
+			if(AIMap.GetTileY(m3) - AIMap.GetTileY(m2) != dy) isNS = false;
+			if(AIMap.GetTileX(m4) != AIMap.GetTileX(m3)) isNS = false;
+			if(AIMap.GetTileY(m4) - AIMap.GetTileY(m3) != dy) isNS = false;
+
+			// --- Try E-W to find straight track ---
+			local isEW = true;
+			local dx = AIMap.GetTileX(m1) - AIMap.GetTileX(m0);
+			if(AIMap.GetTileY(m1) != AIMap.GetTileY(m0)) isEW = false;
+			if(dx == 0) isEW = false;
+			if(AIMap.GetTileY(mm1) != AIMap.GetTileY(m0)) isEW = false;
+			if(AIMap.GetTileX(mm1) - AIMap.GetTileX(m0) != -dx) isEW = false;
+			if(AIMap.GetTileY(m2) != AIMap.GetTileY(m1)) isEW = false;
+			if(AIMap.GetTileX(m2) - AIMap.GetTileX(m1) != dx) isEW = false;
+			if(AIMap.GetTileY(m3) != AIMap.GetTileY(m2)) isEW = false;
+			if(AIMap.GetTileX(m3) - AIMap.GetTileX(m2) != dx) isEW = false;
+			if(AIMap.GetTileY(m4) != AIMap.GetTileY(m3)) isEW = false;
+			if(AIMap.GetTileX(m4) - AIMap.GetTileX(m3) != dx) isEW = false;
+
+			// Only check diagonal window if not already detected as straight track
+			local diagWindow = (!isNS && !isEW) ? FourWayJunction._CheckDiagonalWindow(mainTiles, p2Set, i) : null;
+
+
+			if(!isNS && !isEW && diagWindow == null) continue;
+
+			// --- Straight junction attempt ---
+			if(isNS || isEW) {
+				// Determine perpendicular offset direction
+				local offX = (dx == 0) ? 1 : 0; // N-S → shift in X
+				local offY = (dy == 0) ? 1 : 0; // E-W → shift in Y
+
+				// All 4 must have a parallel tile at consistent offset
+				local offset = null;
+				local parallelOk = true;
+
+				foreach(mt in [m0, m1, m2, m3]) {
+					local found = false;
+
+					foreach(sign in [-1, 1]) {
+						local candidate = AIMap.GetTileIndex(
+							AIMap.GetTileX(mt) + sign * offX,
+							AIMap.GetTileY(mt) + sign * offY
+						);
+
+						if(p2Set.rawin(candidate)) {
+							if(offset == null) offset = sign;
+							if(sign == offset) { found = true; break; }
+						}
+					}
+					if(!found) { parallelOk = false; break; }
+				}
+
+				if(parallelOk) {
+					// All 5 main tiles and their parallel counterparts must be level
+					local levelOk = true;
+					local baseHeight = AITile.GetMinHeight(m1);
+
+					foreach(mt in [mm1, m0, m1, m2, m3]) {
+						if(AITile.GetMinHeight(mt) != baseHeight) {
+							levelOk = false; break;
+						}
+
+						local par = AIMap.GetTileIndex(
+							AIMap.GetTileX(mt) + offset * offX,
+							AIMap.GetTileY(mt) + offset * offY
+						);
+
+						if(AITile.GetMinHeight(par) != baseHeight) {
+							levelOk = false; break;
+						}
+					}
+
+					if(levelOk) {
+						// Approach tiles (mm1, m0, m4 and their parallels) must have no perpendicular
+						// branch connections — a branch there would indicate another junction overlaps.
+						local noBranchOk = true;
+						foreach(mt in [mm1, m0, m4]) {
+							local par = AIMap.GetTileIndex(
+								AIMap.GetTileX(mt) + offset * offX,
+								AIMap.GetTileY(mt) + offset * offY);
+							foreach(t in [mt, par]) {
+								if(!AIRail.IsRailTile(t)) continue;
+								// A straight N-S tile should only have RAILTRACK_NW_SE set.
+								// A straight E-W tile should only have RAILTRACK_NE_SW set.
+								// Any other track bits mean there is a branch at this approach tile.
+								local tracks = AIRail.GetRailTracks(t);
+								local expectedTrack = isNS ? AIRail.RAILTRACK_NW_SE : AIRail.RAILTRACK_NE_SW;
+								if((tracks & ~expectedTrack) != 0) {
+									HgLog.Info("FourWayJunction: branch at approach tile " + HgTile(t) + " tracks=" + tracks);
+									noBranchOk = false;
+									break;
+								}
+							}
+							if(!noBranchOk) break;
+						}
+
+						if(noBranchOk) {
+							// Origin = NW corner of the switch tile pair (m1 and its parallel).
+							local pm1 = AIMap.GetTileIndex(AIMap.GetTileX(m1) + offset * offX, AIMap.GetTileY(m1) + offset * offY);
+							local origin = AIMap.GetTileIndex(
+								min(AIMap.GetTileX(m1), AIMap.GetTileX(pm1)),
+								min(AIMap.GetTileY(m1), AIMap.GetTileY(pm1)));
+
+							// dy>0: going south => station is north => rotate=false, flipY=false
+							// dy<0: going north => station is south => rotate=false, flipY=true
+							// dx>0: going west => station is east => rotate=true, flipY=false
+							// dx<0: going east => station is west => rotate=true, flipY=true
+							local rotate = (dx != 0);
+							local flipY;
+							if (!rotate) {
+								flipY = (dy < 0); // N-S case
+							} else {
+								flipY = (dx < 0); // E-W case
+							}
+							// Near a source station the junction faces the wrong way — invert flipY.
+							if (nearSrc) flipY = !flipY;
+
+							tried++;
+							HgLog.Info("FourWayJunction.Try: i=" + i + " origin=" + HgTile(origin)
+								+ " flipY=" + flipY + " rotate=" + rotate);
+
+							if(rightTile == -1) {
+								local rightJ = RightDivergeJunction(origin, flipY, flipY, rotate);
+								if(rightJ.Build(true)) {
+									if(rightJ.Build(false)) {
+										HgLog.Info("RightDivergeJunction built at " + HgTile(origin)
+											+ " flipY=" + flipY);
+										rightTile = rightJ.GetBranchEndTile();
+										rightPath = rightJ.GetBranchPath();
+										rightInboundPath = rightJ.GetInboundBranchPath();
+									}
+								} else {
+									HgLog.Info("FourWayJunction.Try: right test failed at i=" + i
+										+ " origin=" + HgTile(origin));
+								}
+							}
+
+							if(leftTile == -1) {
+								local leftJ = RightDivergeJunction(origin, flipY, !flipY, rotate);
+								if(leftJ.Build(true)) {
+									if(leftJ.Build(false)) {
+										HgLog.Info("LeftDivergeJunction built at " + HgTile(origin)
+											+ " flipY=" + flipY);
+										leftTile = leftJ.GetBranchEndTile();
+										leftPath = leftJ.GetBranchPath();
+										leftInboundPath = leftJ.GetInboundBranchPath();
+									}
+								} else {
+									HgLog.Info("FourWayJunction.Try: left test failed at i=" + i
+										+ " origin=" + HgTile(origin));
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// --- Diagonal junction attempt ---
+			if(diagWindow != null && (leftTile == -1 || rightTile == -1)) {
+				local origin = m1; // mainTiles[i] maps to canonical (0,0)
+				// Origin must be at a tile where tracks of both direction of the spine must be present
+				local originTracks = AIRail.GetRailTracks(origin);
+				if(originTracks == (AIRail.RAILTRACK_NW_NE + AIRail.RAILTRACK_SW_SE) || originTracks == (AIRail.RAILTRACK_NW_SW + AIRail.RAILTRACK_NE_SE)) {
+					//do nothing
+				} else {
+					continue;
+				}
+
+				// Determine orientation candidates based on diagonal direction and parallel side
+				// diagWindow = {diagDx, diagDy, parallelOffX, parallelOffY}
+				local dDx = diagWindow.diagDx;
+				local dDy = diagWindow.diagDy;
+				local pOffX = diagWindow.parallelOffX;
+				local pOffY = diagWindow.parallelOffY;
+
+				// Four orientation combos to try for right and left diagonal junctions.
+				HgLog.Info("FourWayJunction.Try diagonal: i=" + i + " origin=" + HgTile(origin)
+					+ " diagDx=" + dDx + " diagDy=" + dDy
+					+ " pOffX=" + pOffX + " pOffY=" + pOffY);
+
+				// Derive orientation directly from spine type and direction of travel.
+				//   X and Y moving in different directions → NW→SE spine
+				//   both X and Y increasing/decreasing same direction → NE→SW spine
+				local isNESW = (dDx == dDy);
+				// isHeadingSouth → true if Y is decreasing (inverted direction as dDy is from source to destination)
+				local isHeadingSouth = (dDy < 0);
+
+				if(rightTile == -1) {
+					local rightJ = RightDivergeDiagonalJunction(origin, isNESW, isHeadingSouth, "right");
+					tried++;
+					if(rightJ.Build(true)) {
+						if(rightJ.Build(false)) {
+							rightTile = rightJ.GetBranchEndTile();
+							rightPath = rightJ.GetBranchPath();
+							rightInboundPath = rightJ.GetInboundBranchPath();
+							HgLog.Info("RightDivergeDiagonalJunction built"
+								+ " [" + isNESW + "," + isHeadingSouth + "]"
+								+ " origin=" + HgTile(origin)
+								+ " branchEnd=" + HgTile(rightTile)
+								+ " path0=" + HgTile(rightPath[0]));
+						}
+					}
+				}
+
+				if(leftTile == -1) {
+					local leftJ = RightDivergeDiagonalJunction(origin, isNESW, isHeadingSouth, "left");
+					tried++;
+					if(leftJ.Build(true)) {
+						if(leftJ.Build(false)) {
+							leftTile = leftJ.GetBranchEndTile();
+							leftPath = leftJ.GetBranchPath();
+							leftInboundPath = leftJ.GetInboundBranchPath();
+							HgLog.Info("LeftDivergeDiagonalJunction built"
+								+ " [" + isNESW + "," + isHeadingSouth + "]"
+								+ " origin=" + HgTile(origin)
+								+ " branchEnd=" + HgTile(leftTile)
+								+ " path0=" + HgTile(leftPath[0]));
+						}
+					}
+				}
+			}
+		}
+		HgLog.Info("FourWayJunction.TryBuildNearStation: tried=" + tried
+			+ " leftTile=" + leftTile + " rightTile=" + rightTile);
+		return {leftTile = leftTile, rightTile = rightTile,
+			leftPath = leftPath, rightPath = rightPath,
+			leftInboundPath = leftInboundPath, rightInboundPath = rightInboundPath};
+	}
+
+	// Check if mainTiles[i-6..i+7] forms a diagonal parallel-track window.
+	// Junction body: m0(i-1)..m3(i+2). Approach clearance: 5 tiles before m0, 5 tiles after m3.
+	// Returns null if not diagonal, or {diagDx, diagDy, parallelOffX, parallelOffY} if valid.
+	// diagDx/diagDy: the net diagonal direction per 2 tiles (e.g. +1,+1 for NW→SE going right-down).
+	// parallelOffX/parallelOffY: perpendicular offset to find the parallel track.
+	static function _CheckDiagonalWindow(mainTiles, p2Set, i) {
+		if(i < 6 || i + 7 >= mainTiles.len()) return null;
+
+		local mm5 = mainTiles[i - 6];
+		local mm4 = mainTiles[i - 5];
+		local mm3 = mainTiles[i - 4];
+		local mm2 = mainTiles[i - 3];
+		local mm1 = mainTiles[i - 2];
+		local m0  = mainTiles[i - 1];
+		local m1  = mainTiles[i];
+		local m2  = mainTiles[i + 1];
+		local m3  = mainTiles[i + 2];
+		local m4  = mainTiles[i + 3];
+		local m5  = mainTiles[i + 4];
+		local m6  = mainTiles[i + 5];
+		local m7  = mainTiles[i + 6];
+		local m8  = mainTiles[i + 7];
+
+		// Compute steps between consecutive tiles
+		local steps = [];
+		local seq = [mm5, mm4, mm3, mm2, mm1, m0, m1, m2, m3, m4, m5, m6, m7, m8];
+		for(local k = 0; k < 13; k++) {
+			local sx = AIMap.GetTileX(seq[k+1]) - AIMap.GetTileX(seq[k]);
+			local sy = AIMap.GetTileY(seq[k+1]) - AIMap.GetTileY(seq[k]);
+			steps.push([sx, sy]);
+		}
+
+		// Each step must be axis-aligned (±1, 0) or (0, ±1)
+		foreach(s in steps) {
+			local ax = (s[0] < 0) ? -s[0] : s[0];
+			local ay = (s[1] < 0) ? -s[1] : s[1];
+			if(!((ax == 1 && ay == 0) || (ax == 0 && ay == 1))) {
+				return null;
+			}
+		}
+
+		// For a diagonal zig-zag, every consecutive pair of steps must sum to the same diagonal direction.
+		local net01x = steps[0][0] + steps[1][0];
+		local net01y = steps[0][1] + steps[1][1];
+
+		// Net steps must be diagonal: |net_x|==1 && |net_y|==1
+		local ax01 = (net01x < 0) ? -net01x : net01x;
+		local ay01 = (net01y < 0) ? -net01y : net01y;
+		if(ax01 != 1 || ay01 != 1) {
+			return null;
+		}
+
+		// All remaining consecutive step pairs must match net01
+		for(local k = 1; k <= 11; k++) {
+			local nx = steps[k][0] + steps[k+1][0];
+			local ny = steps[k][1] + steps[k+1][1];
+			if(nx != net01x || ny != net01y) return null;
+		}
+
+		// diagDx/diagDy is the net diagonal step direction
+		local diagDx = net01x;
+		local diagDy = net01y;
+
+		// Diagonal double-tracks share corner tiles (out-of-phase zig-zags), so the perpendicular
+		// offset from a main tile to its parallel counterpart is NOT consistent — it alternates
+		// between the canonical perpendicular (+1,-1) and adjacent offsets like (+1,0) or (0,-1).
+		// Accept any tile in p2Set within the 3-offset "cone" on each side of the diagonal.
+		// For NW→SE diagonal (diagDx*diagDy > 0): NE-side offsets are (+1,-1),(+1,0),(0,-1)
+		//                                           SW-side offsets are (-1,+1),(-1,0),(0,+1)
+		// For NE→SW diagonal (diagDx*diagDy < 0): NE-side offsets are (+1,+1),(+1,0),(0,+1)  [not used yet]
+		//                                           SW-side offsets are (-1,-1),(-1,0),(0,-1)
+		// sideOptions[0] = positive-perpendicular side; sideOptions[1] = negative-perpendicular side
+		// Each entry is a list of offsets to try for that side.
+		// canonical[0/1] = the canonical offset to return for each side (used for orientation mapping).
+		local sideOptions;
+		local canonical;
+		if(diagDx * diagDy < 0) {
+			// NE→SW diagonal: perp sides are (+1,+1) or (-1,-1)
+			sideOptions = [[[1,1],[1,0],[0,1]], [[-1,-1],[-1,0],[0,-1]]];
+			canonical = [[1,1],[-1,-1]];
+		} else {
+			// NW→SE diagonal: perp sides are (+1,-1) or (-1,+1)
+			sideOptions = [[[1,-1],[1,0],[0,-1]], [[-1,1],[-1,0],[0,1]]];
+			canonical = [[1,-1],[-1,1]];
+		}
+
+		// Find which side has parallel tiles for all tiles in the window (body + 5-tile approach clearance each side)
+		local parallelOffX = null;
+		local parallelOffY = null;
+		for(local si = 0; si < 2; si++) {
+			local offsets = sideOptions[si];
+			local allFound = true;
+			foreach(mt in [mm5, mm4, mm3, mm2, mm1, m0, m1, m2, m3, m4, m5, m6, m7, m8]) {
+				local found = false;
+				foreach(off in offsets) {
+					local candidate = AIMap.GetTileIndex(
+						AIMap.GetTileX(mt) + off[0],
+						AIMap.GetTileY(mt) + off[1]
+					);
+					if(p2Set.rawin(candidate)) { found = true; break; }
+				}
+				if(!found) { allFound = false; break; }
+			}
+			if(allFound) {
+				parallelOffX = canonical[si][0];
+				parallelOffY = canonical[si][1];
+				break;
+			}
+		}
+
+		if(parallelOffX == null) return null;
+
+		return {diagDx = diagDx, diagDy = diagDy,
+			parallelOffX = parallelOffX, parallelOffY = parallelOffY};
+	}
+}

@@ -153,6 +153,8 @@ class TrainRoute extends Route {
 		trainRoute.oldCargoProduction = t.oldCargoProduction;
 		trainRoute.lastConvertRail = t.rawin("lastConvertRail") ? t.lastConvertRail : null;
 		trainRoute.lastChangeDestDate = t.lastChangeDestDate;
+		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
+		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
 		trainRoute.saveData = t;
 		//trainRoute.usedRateHistory = t.rawin("usedRateHistory") ? t.usedRateHistory : [];
 		trainRoute.InitializeCargoSet();
@@ -302,6 +304,8 @@ class TrainRoute extends Route {
 	lastChangeDestDate = null;
 	cannotChangeDest = null;
 	oldCargoProduction = null;
+	lostVehicleCount = null;
+	lostSuppressUntil = null;
 
 	saveData = null;
 	
@@ -337,6 +341,8 @@ class TrainRoute extends Route {
 		this.trainLength = 7;
 		this.additionalTiles = [];
 		this.cannotChangeDest = false;
+		this.lostVehicleCount = 0;
+		this.lostSuppressUntil = 0;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -394,6 +400,8 @@ class TrainRoute extends Route {
 		t.lastChangeDestDate <- lastChangeDestDate;
 		t.cannotChangeDest <- cannotChangeDest;
 		t.oldCargoProduction <- oldCargoProduction;
+		t.lostVehicleCount <- lostVehicleCount;
+		t.lostSuppressUntil <- lostSuppressUntil;
 		t.returnRoute <- null; // SaveStaticで保存する
 		saveData = t;
 	}
@@ -1952,6 +1960,8 @@ class TrainRoute extends Route {
 		HgLog.Warning("Demolish " + this);
 		local execMode = AIExecMode();
 		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+			// Network mode: leave tracks intact for reuse by other routes.
+			// Only remove stations (if unused by other routes) and depots.
 			foreach(tile in pathSrcToDest.array_) {
 				TrainRoute.RemoveUsedTile(tile);
 			}
@@ -1960,6 +1970,31 @@ class TrainRoute extends Route {
 					TrainRoute.RemoveUsedTile(tile);
 				}
 			}
+			srcHgStation.RemoveIfNotUsed();
+			foreach(station in destHgStations) {
+				station.RemoveIfNotUsed();
+			}
+			foreach(tile,depotInfo in depotInfos) {
+				foreach(depotTile in depotInfo.depots) {
+					AITile.DemolishTile(depotTile);
+				}
+			}
+			local tiles = [];
+			tiles.extend(additionalTiles);
+			foreach(tile in tiles) {
+				if(AIRail.IsRailDepotTile(tile)) {
+					AITile.DemolishTile(tile);
+				}
+			}
+			// Deregister paths without physically removing rails
+			pathSrcToDest.Remove(false/*physicalRemove*/, false/*DoInterval*/);
+			if(pathDestToSrc != null) {
+				pathDestToSrc.Remove(false/*physicalRemove*/, false/*DoInterval*/);
+			}
+			if(returnRoute != null) {
+				returnRoute.Demolish();
+			}
+			return;
 		}
 		srcHgStation.RemoveIfNotUsed();
 		foreach(station in destHgStations) {
@@ -2413,6 +2448,23 @@ class TrainRoute extends Route {
 		if(isClosed || isRemoved || updateRailDepot!=null || IsSingle()) {
 			return;
 		}
+		if(lostSuppressUntil > 0) {
+			local today = AIDate.GetCurrentDate();
+			if(today < lostSuppressUntil) return;
+			// Timer expired: decay count by 1 and set a new timer at the lower level
+			lostVehicleCount--;
+			if(lostVehicleCount > 0) {
+				lostSuppressUntil = today + GetLostSuppressDays(lostVehicleCount);
+				HgLog.Info("TrainRoute.CheckCloneTrain: lost suppress decayed to count="
+					+ lostVehicleCount + ", suppressing " + GetLostSuppressDays(lostVehicleCount) + " more days " + this);
+			} else {
+				lostSuppressUntil = 0;
+				HgLog.Info("TrainRoute.CheckCloneTrain: lost suppress cleared " + this);
+			}
+			saveData.lostVehicleCount = lostVehicleCount;
+			saveData.lostSuppressUntil = lostSuppressUntil;
+			return;
+		}
 		local ng = false;
 		local srcStationId = srcHgStation.GetAIStation() 
 		local srcStationStops = [];
@@ -2438,6 +2490,25 @@ class TrainRoute extends Route {
 		}
 		
 		local numVehicles = GetNumVehicles();
+		// Speed check: if average speed of moving vehicles is below 25% of max speed, the route
+		// is congested — adding more trains would make it worse.
+		if(numVehicles >= 3) {
+			local speedSum = 0;
+			local speedCount = 0;
+			foreach(v, _ in GetVehicleList()) {
+				if(AIVehicle.IsInDepot(v)) continue;
+				if(AIVehicle.GetState(v) == AIVehicle.VS_AT_STATION) continue;
+				local maxSpeed = AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(v));
+				if(maxSpeed <= 0) continue;
+				speedSum += AIVehicle.GetCurrentSpeed(v).tofloat() / maxSpeed;
+				speedCount++;
+			}
+			if(speedCount >= 3 && speedSum / speedCount < 0.25) {
+				HgLog.Info("CheckCloneTrain: suppressing clone, avg speed ratio="
+					+ (speedSum / speedCount) + " " + this);
+				return;
+			}
+		}
 		if(IsCloneTrain()) {
 			local numClone = 1;
 			if(latestEngineSet != null) {
@@ -2455,6 +2526,14 @@ class TrainRoute extends Route {
 			local capacity = GetCargoCapacity(cargo);
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null) numClone = min(numClone, maxTrains - numVehicles);
+			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+				numClone = min(numClone, latestEngineSet.vehiclesPerRoute - numVehicles);
+				if(numClone <= 0) {
+					HgLog.Info("CheckCloneTrain: suppressing clone, numVehicles=" + numVehicles
+						+ " >= vehiclesPerRoute=" + latestEngineSet.vehiclesPerRoute + " " + this);
+					return;
+				}
+			}
 			numClone = max(1,min( numClone, waiting / capacity ));
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
 			for(local i=0; i<numClone; i++) {
@@ -2650,9 +2729,19 @@ class TrainRoute extends Route {
 		}
 	}
 
+	function GetLostSuppressDays(count) {
+		if(count <= 1) return 365;
+		return 365 * count;
+	}
+
 	function OnVehicleLost(vehicle) {
-		HgLog.Warning("RailRoute OnVehicleLost  "+this);
-		// SendVehicleToDepot(vehicle); 全部いなくなる事がある
+		lostVehicleCount++;
+		local days = GetLostSuppressDays(lostVehicleCount);
+		lostSuppressUntil = AIDate.GetCurrentDate() + days;
+		saveData.lostVehicleCount = lostVehicleCount;
+		saveData.lostSuppressUntil = lostSuppressUntil;
+		HgLog.Warning("TrainRoute.OnVehicleLost: suppressing new trains for " + days
+			+ " days (lostCount=" + lostVehicleCount + ") " + this);
 	}
 }
 
@@ -3007,6 +3096,9 @@ class TrainRouteBuilder extends RouteBuilder {
 			SetBuilt("engineSet",engineSet);
 		}
 		local useSingle = engineSet.isSingle; //HogeAI.Get().GetUsableMoney() < HogeAI.Get().GetInflatedMoney(100000) && !HogeAI.Get().HasIncome(20000);
+		if(!CargoUtils.IsPaxOrMail(cargo)) {
+			useSingle = false; // Force freight lines to be double tracked
+		}
 		if(useSingle) {
 			idealDistance = distance;
 		}
@@ -3019,7 +3111,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		local useSimpleStation = !(dest instanceof Place);
 		local destHgStation = GetBuilt("destHgStation");
 		if(destHgStation == null) {
-			local destStationFactory = TerminalStationFactory();
+			local destStationFactory = HogeAI.Get().IsNetworkMode() ? DestRailStationFactory() : TerminalStationFactory();
 			destStationFactory.distance = idealDistance;
 			destStationFactory.useSingle = useSingle;
 			destStationFactory.useSimple = useSimpleStation;
@@ -3201,6 +3293,18 @@ class TrainRouteBuilder extends RouteBuilder {
 					TrainRoute.AddUsedTile(tile);
 				}
 			}
+		}
+
+		// For long double-tracked freight routes, add a Y-junction
+		// near to each station to enable future network connections.
+		if(!useSingle && !CargoUtils.IsPaxOrMail(cargo)
+				&& !HogeAI.Get().IsNetworkMode()
+				&& route.pathDestToSrc != null
+				&& route.pathSrcToDest.array_.len() > 40) {
+			local arr1 = route.pathSrcToDest.array_;
+			local arr2 = route.pathDestToSrc.array_;
+			FourWayJunction.TryBuildNearStation(arr1, arr2, 10, 30, false); // near dest
+			FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);  // near source
 		}
 
 		if(CargoUtils.IsPaxOrMail(cargo)) {
