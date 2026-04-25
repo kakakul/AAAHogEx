@@ -354,7 +354,7 @@ class RailPathFinder
 		local wrongSide = {};
 		_reverseNears = {};
 		_reverseTiles = {};
-
+		
 		local path = reversePath;
 		local prev = null;
 		local prevprev = null;
