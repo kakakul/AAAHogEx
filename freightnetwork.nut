@@ -62,6 +62,7 @@ class FreightNetwork {
 				leg1Path = j.leg1Path,
 				leg2Path = j.leg2Path,
 				srcIndustry = j.srcIndustry,
+				routeId = j.rawin("routeId") ? j.routeId : null,
 				primaryRadius = j.primaryRadius,
 				perpOutRadius = j.perpOutRadius,
 				perpInRadius = j.perpInRadius
@@ -103,6 +104,7 @@ class FreightNetwork {
 				leg1Path = j.leg1Path,
 				leg2Path = j.leg2Path,
 				srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
+				routeId = j.rawin("routeId") ? j.routeId : null,
 				primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 0,
 				perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 0,
 				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
@@ -162,14 +164,18 @@ class FreightNetwork {
 		RailRemover(ArrayUtils.Reverse(path), null, false, false).Build();
 	}
 
-	function FreightNetwork::PruneUnusedJunctions() {
+	function FreightNetwork::RemoveUnusedJunctionsForRoute(routeId) {
 		local ji = 0;
 		while(ji < FreightNetwork.availableJunctions.len()) {
 			local j = FreightNetwork.availableJunctions[ji];
+			if(!j.rawin("routeId") || j.routeId != routeId) {
+				ji++;
+				continue;
+			}
 			local leg1Unused = FreightNetwork.IsJunctionPathUnused(j.leg1Path);
 			local leg2Unused = FreightNetwork.IsJunctionPathUnused(j.leg2Path);
 			if(leg1Unused && leg2Unused) {
-				HgLog.Info("FreightNetwork.PruneUnusedJunctions: removing unused junction "
+				HgLog.Info("FreightNetwork.RemoveUnusedJunctionsForRoute: removing unused junction "
 					+ HgTile(j.mergeTile));
 				FreightNetwork.TryRemoveJunctionPath(j.leg1Path);
 				FreightNetwork.TryRemoveJunctionPath(j.leg2Path);
@@ -562,6 +568,7 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
+					routeId = route.id,
 					primaryRadius = 10,
 					perpOutRadius = 5,
 					perpInRadius = 0,
@@ -591,6 +598,7 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
+					routeId = route.id,
 					primaryRadius = 10,
 					perpOutRadius = 5,
 					perpInRadius = 0,
