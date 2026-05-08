@@ -2073,6 +2073,7 @@ class TrainRoute extends Route {
 		if(IsNetworkFreightRoute()) {
 			// Network mode: keep shared tracks intact for reuse by other routes.
 			// Remove whole paths only when every tile in that path is no longer referenced.
+			FreightNetwork.ReleaseRouteService(this);
 			local removableTiles = DeregisterRailUsageAndCollectUnused();
 			RemoveOrDeregisterPath(pathSrcToDest, removableTiles);
 			RemoveOrDeregisterPath(pathDestToSrc, removableTiles);

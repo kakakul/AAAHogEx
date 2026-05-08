@@ -216,6 +216,77 @@ class FreightNetwork {
 		return FreightNetwork.state.destIndustry;
 	}
 
+	function FreightNetwork::GetRouteSourceIndustry(route) {
+		if(route == null || route.srcHgStation == null || route.srcHgStation.place == null) return -1;
+		if(!(route.srcHgStation.place instanceof HgIndustry)) return -1;
+		return route.srcHgStation.place.industry;
+	}
+
+	function FreightNetwork::GetRouteDestIndustry(route) {
+		if(route == null) return -1;
+		if(route.consumedJunction != null && route.consumedJunction.rawin("destIndustry")) {
+			return route.consumedJunction.destIndustry;
+		}
+		if(route.destHgStation == null || route.destHgStation.place == null) return -1;
+		if(!(route.destHgStation.place instanceof HgIndustry)) return -1;
+		return route.destHgStation.place.industry;
+	}
+
+	function FreightNetwork::HasOtherLiveRouteForSource(route, srcIndustry) {
+		if(srcIndustry == -1) return false;
+		foreach(_, other in Route.allRoutes) {
+			if(!(other instanceof TrainRoute)) continue;
+			if(other == route) continue;
+			if(other.IsRemoved()) continue;
+			if(!other.IsNetworkFreightRoute()) continue;
+			if(FreightNetwork.GetRouteSourceIndustry(other) == srcIndustry) return true;
+		}
+		return false;
+	}
+
+	function FreightNetwork::MarkRouteServiceReleased(route) {
+		if(route == null || route.saveData == null) return;
+		if(route.saveData.rawin("freightNetworkServiceReleased")) {
+			route.saveData.freightNetworkServiceReleased = true;
+		} else {
+			route.saveData.freightNetworkServiceReleased <- true;
+		}
+	}
+
+	function FreightNetwork::IsRouteServiceReleased(route) {
+		return route != null
+			&& route.saveData != null
+			&& route.saveData.rawin("freightNetworkServiceReleased")
+			&& route.saveData.freightNetworkServiceReleased;
+	}
+
+	function FreightNetwork::ReleaseRouteService(route) {
+		if(route == null || !(route instanceof TrainRoute)) return;
+		if(FreightNetwork.IsRouteServiceReleased(route)) return;
+
+		local srcIndustry = FreightNetwork.GetRouteSourceIndustry(route);
+		local destIndustry = FreightNetwork.GetRouteDestIndustry(route);
+		if(srcIndustry != -1
+				&& FreightNetwork.servedSources.rawin(srcIndustry)
+				&& !FreightNetwork.HasOtherLiveRouteForSource(route, srcIndustry)) {
+			FreightNetwork.servedSources.rawdelete(srcIndustry);
+			HgLog.Info("FreightNetwork.ReleaseRouteService: released source "
+				+ (AIIndustry.IsValidIndustry(srcIndustry) ? AIIndustry.GetName(srcIndustry) : srcIndustry));
+		}
+		if(destIndustry != -1 && FreightNetwork.servedDests.rawin(destIndustry)) {
+			local nextCount = FreightNetwork.servedDests[destIndustry] - 1;
+			if(nextCount > 0) {
+				FreightNetwork.servedDests.rawset(destIndustry, nextCount);
+			} else {
+				FreightNetwork.servedDests.rawdelete(destIndustry);
+			}
+			HgLog.Info("FreightNetwork.ReleaseRouteService: servedDests["
+				+ (AIIndustry.IsValidIndustry(destIndustry) ? AIIndustry.GetName(destIndustry) : destIndustry)
+				+ "]=" + max(nextCount, 0));
+		}
+		FreightNetwork.MarkRouteServiceReleased(route);
+	}
+
 	function FreightNetwork::HasAvailableJunctionForDest(destIndustry) {
 		if(destIndustry == null) return false;
 		foreach(j in FreightNetwork.availableJunctions) {
