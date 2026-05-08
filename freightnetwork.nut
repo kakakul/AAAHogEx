@@ -341,7 +341,7 @@ class FreightNetwork {
 
 		local allDests = AIIndustryList();
 
-		for(local edgePct = 10; edgePct <= 100; edgePct += 10) {
+		for(local edgePct = 10; edgePct <= 30; edgePct += 10) {
 			local edgeThresh = mapLongSide * edgePct / 100;
 			local maxRouteDist = max(mapLongSide * edgePct / 100, 100);
 			local bestCandidate = null;
