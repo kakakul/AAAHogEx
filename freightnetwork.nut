@@ -149,6 +149,37 @@ class FreightNetwork {
 		return false;
 	}
 
+	function FreightNetwork::IsJunctionPathUnused(path) {
+		if(path == null) return true;
+		foreach(tile in path) {
+			if(TrainRoute.IsUsedTile(tile)) return false;
+		}
+		return true;
+	}
+
+	function FreightNetwork::TryRemoveJunctionPath(path) {
+		if(path == null || path.len() < 3) return;
+		RailRemover(ArrayUtils.Reverse(path), null, false, false).Build();
+	}
+
+	function FreightNetwork::PruneUnusedJunctions() {
+		local ji = 0;
+		while(ji < FreightNetwork.availableJunctions.len()) {
+			local j = FreightNetwork.availableJunctions[ji];
+			local leg1Unused = FreightNetwork.IsJunctionPathUnused(j.leg1Path);
+			local leg2Unused = FreightNetwork.IsJunctionPathUnused(j.leg2Path);
+			if(leg1Unused && leg2Unused) {
+				HgLog.Info("FreightNetwork.PruneUnusedJunctions: removing unused junction "
+					+ HgTile(j.mergeTile));
+				FreightNetwork.TryRemoveJunctionPath(j.leg1Path);
+				FreightNetwork.TryRemoveJunctionPath(j.leg2Path);
+				FreightNetwork.availableJunctions.remove(ji);
+				continue;
+			}
+			ji++;
+		}
+	}
+
 	function FreightNetwork::ScanFeeders(branchRoute) {
 		local srcStation = branchRoute.srcHgStation;
 		local stationTile = srcStation.platformTile;

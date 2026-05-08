@@ -2069,6 +2069,7 @@ class TrainRoute extends Route {
 			RemoveOrDeregisterPath(pathSrcToDest, removableTiles);
 			RemoveOrDeregisterPath(pathDestToSrc, removableTiles);
 			RemoveUnusedSharedRailPaths(removableTiles);
+			FreightNetwork.PruneUnusedJunctions();
 			srcHgStation.RemoveIfNotUsed();
 			foreach(station in destHgStations) {
 				station.RemoveIfNotUsed();
