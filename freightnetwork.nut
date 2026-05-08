@@ -164,6 +164,90 @@ class FreightNetwork {
 		RailRemover(ArrayUtils.Reverse(path), null, false, false).Build();
 	}
 
+	function FreightNetwork::CopyJunction(j) {
+		return {
+			mergeTile = j.mergeTile,
+			leg1Path = j.leg1Path,
+			leg2Path = j.leg2Path,
+			srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
+			routeId = j.rawin("routeId") ? j.routeId : null,
+			primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 10,
+			perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 5,
+			perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
+			triedIndustries = {}
+		};
+	}
+
+	function FreightNetwork::IsRouteLive(routeId) {
+		return routeId != null
+			&& Route.allRoutes.rawin(routeId)
+			&& !Route.allRoutes[routeId].IsRemoved();
+	}
+
+	function FreightNetwork::HasLiveChildRoute(routeId) {
+		if(routeId == null) return false;
+		foreach(_, route in Route.allRoutes) {
+			if(!(route instanceof TrainRoute)) continue;
+			if(route.id == routeId) continue;
+			if(route.IsRemoved()) continue;
+			if(route.parentRouteId == routeId) return true;
+		}
+		return false;
+	}
+
+	function FreightNetwork::AvailableJunctionExists(junction) {
+		if(junction == null) return false;
+		foreach(j in FreightNetwork.availableJunctions) {
+			if(j.mergeTile == junction.mergeTile
+					&& j.rawin("routeId")
+					&& junction.rawin("routeId")
+					&& j.routeId == junction.routeId) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function FreightNetwork::IsJunctionPathPresent(path) {
+		if(path == null || path.len() < 3) return false;
+		foreach(tile in path) {
+			if(!AIRail.IsRailTile(tile)) return false;
+		}
+		return true;
+	}
+
+	function FreightNetwork::CanRestoreConsumedJunction(route) {
+		if(route == null || !(route instanceof TrainRoute)) return false;
+		local j = route.consumedJunction;
+		if(j == null) return false;
+		if(!FreightNetwork.IsRouteLive(j.routeId)) return false;
+		if(FreightNetwork.HasLiveChildRoute(route.id)) return false;
+		if(FreightNetwork.AvailableJunctionExists(j)) return false;
+		if(!FreightNetwork.IsJunctionPathPresent(j.leg1Path)) return false;
+		if(!FreightNetwork.IsJunctionPathPresent(j.leg2Path)) return false;
+		return true;
+	}
+
+	function FreightNetwork::RestoreConsumedJunctionForRoute(route) {
+		if(route == null) return;
+		if(FreightNetwork.CanRestoreConsumedJunction(route)) {
+			local j = FreightNetwork.CopyJunction(route.consumedJunction);
+			HgLog.Info("FreightNetwork.RestoreConsumedJunctionForRoute: restoring junction "
+				+ HgTile(j.mergeTile) + " for route " + j.routeId);
+			FreightNetwork.availableJunctions.push(j);
+			route.consumedJunction = null;
+			if(route.saveData != null) route.saveData.consumedJunction = null;
+		}
+		if(route instanceof TrainRoute
+				&& route.parentRouteId != null
+				&& Route.allRoutes.rawin(route.parentRouteId)) {
+			local parent = Route.allRoutes[route.parentRouteId];
+			if(parent.IsRemoved()) {
+				FreightNetwork.RestoreConsumedJunctionForRoute(parent);
+			}
+		}
+	}
+
 	function FreightNetwork::RemoveUnusedJunctionsForRoute(routeId) {
 		local ji = 0;
 		while(ji < FreightNetwork.availableJunctions.len()) {
@@ -919,6 +1003,8 @@ class FreightNetwork {
 					newRoute.latestEngineSet = engineSet;
 					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
 					newRoute.destDepot = spineRoute.destDepot;
+					newRoute.parentRouteId = spineRoute.id;
+					newRoute.consumedJunction = FreightNetwork.CopyJunction(junc);
 					newRoute.sharedRailPaths = spineRoute.GetRailUsagePaths();
 					if(srcHgStation.stationGroup == null
 							|| spineRoute.destHgStation == null

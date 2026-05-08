@@ -156,6 +156,8 @@ class TrainRoute extends Route {
 		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
 		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
 		trainRoute.sharedRailPaths = t.sharedRailPaths;
+		trainRoute.parentRouteId = t.parentRouteId;
+		trainRoute.consumedJunction = t.consumedJunction;
 		trainRoute.saveData = t;
 		//trainRoute.usedRateHistory = t.rawin("usedRateHistory") ? t.usedRateHistory : [];
 		trainRoute.InitializeCargoSet();
@@ -308,6 +310,8 @@ class TrainRoute extends Route {
 	lostVehicleCount = null;
 	lostSuppressUntil = null;
 	sharedRailPaths = null;
+	parentRouteId = null;
+	consumedJunction = null;
 
 	saveData = null;
 	
@@ -346,6 +350,8 @@ class TrainRoute extends Route {
 		this.lostVehicleCount = 0;
 		this.lostSuppressUntil = 0;
 		this.sharedRailPaths = [];
+		this.parentRouteId = null;
+		this.consumedJunction = null;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -406,6 +412,8 @@ class TrainRoute extends Route {
 		t.lostVehicleCount <- lostVehicleCount;
 		t.lostSuppressUntil <- lostSuppressUntil;
 		t.sharedRailPaths <- sharedRailPaths;
+		t.parentRouteId <- parentRouteId;
+		t.consumedJunction <- consumedJunction;
 		t.returnRoute <- null; // SaveStaticで保存する
 		saveData = t;
 	}
@@ -2070,6 +2078,7 @@ class TrainRoute extends Route {
 			RemoveOrDeregisterPath(pathDestToSrc, removableTiles);
 			RemoveUnusedSharedRailPaths(removableTiles);
 			FreightNetwork.RemoveUnusedJunctionsForRoute(id);
+			FreightNetwork.RestoreConsumedJunctionForRoute(this);
 			srcHgStation.RemoveIfNotUsed();
 			foreach(station in destHgStations) {
 				station.RemoveIfNotUsed();
