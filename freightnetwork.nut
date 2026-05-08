@@ -880,12 +880,26 @@ class FreightNetwork {
 					newRoute.latestEngineSet = engineSet;
 					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
 					newRoute.destDepot = spineRoute.destDepot;
+					newRoute.sharedRailPaths = spineRoute.GetRailUsagePaths();
+					if(srcHgStation.stationGroup == null
+							|| spineRoute.destHgStation == null
+							|| spineRoute.destHgStation.stationGroup == null) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: station group missing after branch build, rolling back");
+						builtPath1.Remove(true);
+						builtPath2.Remove(true);
+						srcHgStation.Remove();
+						junc.triedIndustries.rawset(found.industry, true);
+						AIRail.SetCurrentRailType(savedRailType);
+						ji++;
+						continue;
+					}
 					newRoute.Initialize();
 					newRoute.pathDistance += spineRoute.pathDistance;	// have to add spineroute distance for correct train length estimation
 					newRoute.saveData.pathDistance = newRoute.pathDistance;
 					newRoute.CalculateUseDepots();
 					TrainRoute.instances.push(newRoute);
 					PlaceDictionary.Get().AddRoute(newRoute);
+					newRoute.RegisterRailUsage();
 
 					// Deploy initial train; skip DoPostBuild to avoid uncontrolled extensions
 					if(!newRoute.BuildFirstTrain()) {

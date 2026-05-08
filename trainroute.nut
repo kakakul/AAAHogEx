@@ -155,6 +155,7 @@ class TrainRoute extends Route {
 		trainRoute.lastChangeDestDate = t.lastChangeDestDate;
 		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
 		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
+		trainRoute.sharedRailPaths = t.sharedRailPaths;
 		trainRoute.saveData = t;
 		//trainRoute.usedRateHistory = t.rawin("usedRateHistory") ? t.usedRateHistory : [];
 		trainRoute.InitializeCargoSet();
@@ -306,6 +307,7 @@ class TrainRoute extends Route {
 	oldCargoProduction = null;
 	lostVehicleCount = null;
 	lostSuppressUntil = null;
+	sharedRailPaths = null;
 
 	saveData = null;
 	
@@ -343,6 +345,7 @@ class TrainRoute extends Route {
 		this.cannotChangeDest = false;
 		this.lostVehicleCount = 0;
 		this.lostSuppressUntil = 0;
+		this.sharedRailPaths = [];
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -402,6 +405,7 @@ class TrainRoute extends Route {
 		t.oldCargoProduction <- oldCargoProduction;
 		t.lostVehicleCount <- lostVehicleCount;
 		t.lostSuppressUntil <- lostSuppressUntil;
+		t.sharedRailPaths <- sharedRailPaths;
 		t.returnRoute <- null; // SaveStaticで保存する
 		saveData = t;
 	}
@@ -426,6 +430,105 @@ class TrainRoute extends Route {
 		cargoSet.rawset(cargo, cargo);
 		foreach(c in subCargos) {
 			cargoSet.rawset(c,c);
+		}
+	}
+
+	function IsNetworkFreightRoute() {
+		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
+	}
+
+	function GetRailUsageTiles() {
+		local tiles = [];
+		local seen = {};
+		foreach(path in GetRailUsagePaths()) {
+			foreach(tile in path) {
+				if(seen.rawin(tile)) continue;
+				seen.rawset(tile, true);
+				tiles.push(tile);
+			}
+		}
+		return tiles;
+	}
+
+	function GetRailUsagePaths() {
+		local paths = [];
+		if(pathSrcToDest != null) {
+			paths.push(pathSrcToDest.array_);
+		}
+		if(pathDestToSrc != null) {
+			paths.push(pathDestToSrc.array_);
+		}
+		if(sharedRailPaths != null) {
+			foreach(path in sharedRailPaths) {
+				paths.push(path);
+			}
+		}
+		return paths;
+	}
+
+	function RegisterRailUsage() {
+		if(!IsNetworkFreightRoute()) return;
+		foreach(tile in GetRailUsageTiles()) {
+			TrainRoute.AddUsedTile(tile);
+		}
+	}
+
+	function DeregisterRailUsageAndCollectUnused() {
+		local removableTiles = {};
+		if(!IsNetworkFreightRoute()) return removableTiles;
+		foreach(tile in GetRailUsageTiles()) {
+			if(TrainRoute.RemoveUsedTile(tile)) {
+				removableTiles.rawset(tile, true);
+			}
+		}
+		return removableTiles;
+	}
+
+	function IsWholePathRemovable(pathArray, removableTiles) {
+		if(pathArray == null) return false;
+		foreach(tile in pathArray) {
+			if(!removableTiles.rawin(tile)) return false;
+		}
+		return true;
+	}
+
+	function RemoveOrDeregisterPath(buildedPath, removableTiles) {
+		if(buildedPath == null) return;
+		if(IsWholePathRemovable(buildedPath.array_, removableTiles)) {
+			buildedPath.Remove(true/*physicalRemove*/, false/*DoInterval*/);
+		} else {
+			RemoveUnusedRailSpans(buildedPath.array_, removableTiles);
+			buildedPath.Remove(false/*physicalRemove*/, false/*DoInterval*/);
+		}
+	}
+
+	function RemoveUnusedSharedRailPaths(removableTiles) {
+		if(sharedRailPaths == null) return;
+		foreach(pathArray in sharedRailPaths) {
+			if(IsWholePathRemovable(pathArray, removableTiles)) {
+				RailRemover(ArrayUtils.Reverse(pathArray), id, false, false).Build();
+			} else {
+				RemoveUnusedRailSpans(pathArray, removableTiles);
+			}
+		}
+	}
+
+	function RemoveUnusedRailSpans(pathArray, removableTiles) {
+		if(pathArray == null) return;
+		local size = pathArray.len();
+		local i = 1;
+		while(i < size - 1) {
+			if(!removableTiles.rawin(pathArray[i])) {
+				i++;
+				continue;
+			}
+			local start = i;
+			while(i < size - 1 && removableTiles.rawin(pathArray[i])) {
+				i++;
+			}
+			local end = i - 1;
+			local span = ArrayUtils.SubArray(pathArray, start - 1, end - start + 3);
+			RailRemover(ArrayUtils.Reverse(span), id, false, false).Build();
 		}
 	}
 	
@@ -1959,17 +2062,13 @@ class TrainRoute extends Route {
 	function Demolish() { // ScanRoutesから呼ばれる
 		HgLog.Warning("Demolish " + this);
 		local execMode = AIExecMode();
-		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
-			// Network mode: leave tracks intact for reuse by other routes.
-			// Only remove stations (if unused by other routes) and depots.
-			foreach(tile in pathSrcToDest.array_) {
-				TrainRoute.RemoveUsedTile(tile);
-			}
-			if(pathDestToSrc != null) {
-				foreach(tile in pathDestToSrc.array_) {
-					TrainRoute.RemoveUsedTile(tile);
-				}
-			}
+		if(IsNetworkFreightRoute()) {
+			// Network mode: keep shared tracks intact for reuse by other routes.
+			// Remove whole paths only when every tile in that path is no longer referenced.
+			local removableTiles = DeregisterRailUsageAndCollectUnused();
+			RemoveOrDeregisterPath(pathSrcToDest, removableTiles);
+			RemoveOrDeregisterPath(pathDestToSrc, removableTiles);
+			RemoveUnusedSharedRailPaths(removableTiles);
 			srcHgStation.RemoveIfNotUsed();
 			foreach(station in destHgStations) {
 				station.RemoveIfNotUsed();
@@ -1985,11 +2084,6 @@ class TrainRoute extends Route {
 				if(AIRail.IsRailDepotTile(tile)) {
 					AITile.DemolishTile(tile);
 				}
-			}
-			// Deregister paths without physically removing rails
-			pathSrcToDest.Remove(false/*physicalRemove*/, false/*DoInterval*/);
-			if(pathDestToSrc != null) {
-				pathDestToSrc.Remove(false/*physicalRemove*/, false/*DoInterval*/);
 			}
 			if(returnRoute != null) {
 				returnRoute.Demolish();
@@ -3284,16 +3378,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		TrainRoute.instances.push(route);
 		PlaceDictionary.Get().AddRoute(route);
 
-		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
-			foreach(tile in route.pathSrcToDest.array_) {
-				TrainRoute.AddUsedTile(tile);
-			}
-			if(route.pathDestToSrc != null) {
-				foreach(tile in route.pathDestToSrc.array_) {
-					TrainRoute.AddUsedTile(tile);
-				}
-			}
-		}
+		route.RegisterRailUsage();
 
 		// For long double-tracked freight routes, add a Y-junction
 		// near to each station to enable future network connections.
