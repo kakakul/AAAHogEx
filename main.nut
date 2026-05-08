@@ -4319,6 +4319,7 @@ class HogeAI extends AIController {
 				case AIEvent.ET_INDUSTRY_OPEN:
 					event = AIEventIndustryOpen.Convert(event);
 					HgLog.Info("ET_INDUSTRY_OPEN:"+AIIndustry.GetName(event.GetIndustryID())+" ID:"+event.GetIndustryID());
+					if(IsNetworkMode()) FreightNetwork.OnIndustryOpen(event.GetIndustryID());
 					break;
 				case AIEvent.ET_VEHICLE_CRASHED:
 					OnVehicleCrashed(AIEventVehicleCrashed.Convert(event));
@@ -4985,4 +4986,3 @@ class RouteCandidates {
 		saveData.minValue = minValue;
 	}
 }
-

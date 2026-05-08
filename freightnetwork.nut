@@ -13,6 +13,9 @@ class FreightNetwork {
 	// Available junction merge tiles: array of {leftTile, rightTile, srcIndustry,
 	//   primaryRadius, perpOutRadius, perpInRadius}
 	static availableJunctions = [];
+	// Junctions that reached the map edge. They are only revived when a new relevant
+	// source industry opens.
+	static dormantJunctions = [];
 	// Industry IDs already serving as sources (across all networks, never cleared)
 	static servedSources = {};
 	// Industry IDs already serving as destinations (across all networks, never cleared)
@@ -38,13 +41,16 @@ class FreightNetwork {
 			return;
 		}
 		if(FreightNetwork.state.destIndustry == null) {
+			FreightNetwork.ActivateAvailableJunctionNetwork();
+		}
+		if(FreightNetwork.state.destIndustry == null) {
 			local built = FreightNetwork.FindSpine();
 			if(built) FreightNetwork.BuildJunctions();
 		} else {
 			local connected = FreightNetwork.SearchAndConnect();
 			if(connected) {
 				FreightNetwork.BuildJunctions();
-			} else if(FreightNetwork.availableJunctions.len() == 0) {
+			} else if(!FreightNetwork.HasAvailableJunctionForDest(FreightNetwork.state.destIndustry)) {
 				HgLog.Info("FreightNetwork: network exhausted, starting network id="
 					+ (FreightNetwork.state.networkId + 1));
 				FreightNetwork.state.destIndustry = null;
@@ -55,23 +61,13 @@ class FreightNetwork {
 	}
 
 	function FreightNetwork::SaveStatics(table) {
-		local junctions = [];
-		foreach(j in FreightNetwork.availableJunctions) {
-			junctions.push({
-				mergeTile = j.mergeTile,
-				leg1Path = j.leg1Path,
-				leg2Path = j.leg2Path,
-				srcIndustry = j.srcIndustry,
-				routeId = j.rawin("routeId") ? j.routeId : null,
-				primaryRadius = j.primaryRadius,
-				perpOutRadius = j.perpOutRadius,
-				perpInRadius = j.perpInRadius,
-				triedIndustries = j.rawin("triedIndustries") ? j.triedIndustries : {}
-			});
-		}
+		FreightNetwork.PruneDormantJunctions();
+		local junctions = FreightNetwork.SaveJunctionList(FreightNetwork.availableJunctions);
+		local dormantJunctions = FreightNetwork.SaveJunctionList(FreightNetwork.dormantJunctions);
 		table.freightNetwork <- {
 			destIndustry = FreightNetwork.state.destIndustry,
 			availableJunctions = junctions,
+			dormantJunctions = dormantJunctions,
 			networkId = FreightNetwork.state.networkId,
 			servedSources = FreightNetwork.servedSources,
 			servedDests = FreightNetwork.servedDests,
@@ -93,30 +89,34 @@ class FreightNetwork {
 		if(fn.rawin("failedPairs")) foreach(k, v in fn.failedPairs) FreightNetwork.failedPairs.rawset(k, v);
 		FreightNetwork.pendingFeeders.clear();
 		if(fn.rawin("pendingFeeders")) foreach(f in fn.pendingFeeders) FreightNetwork.pendingFeeders.push(f);
-		FreightNetwork.availableJunctions.clear();
-		foreach(j in fn.availableJunctions) {
-			if(!j.rawin("mergeTile") || j.mergeTile == -1) continue;
-			// leg1Path/leg2Path are essential for connection; skip entries missing them
-			// (they cannot be recovered without the original route's path data).
-			if(!j.rawin("leg1Path") || j.leg1Path == null) continue;
-			if(!j.rawin("leg2Path") || j.leg2Path == null) continue;
-			FreightNetwork.availableJunctions.push({
-				mergeTile = j.mergeTile,
-				leg1Path = j.leg1Path,
-				leg2Path = j.leg2Path,
-				srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
-				routeId = j.rawin("routeId") ? j.routeId : null,
-				primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 0,
-				perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 0,
-				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
-				triedIndustries = j.rawin("triedIndustries") ? j.triedIndustries : {}
-			});
-		}
+		FreightNetwork.LoadJunctionList(fn.availableJunctions, FreightNetwork.availableJunctions);
+		FreightNetwork.dormantJunctions.clear();
+		if(fn.rawin("dormantJunctions")) FreightNetwork.LoadJunctionList(fn.dormantJunctions, FreightNetwork.dormantJunctions);
 		FreightNetwork.state.destPlace = null;
 		if(FreightNetwork.state.destIndustry != null) {
 			FreightNetwork.state.destPlace = HgIndustry(FreightNetwork.state.destIndustry, false);
 		}
 		FreightNetwork.state.lastBuiltRoute = null;
+	}
+
+	function FreightNetwork::SaveJunctionList(source) {
+		local result = [];
+		foreach(j in source) {
+			result.push(FreightNetwork.CopyJunction(j));
+		}
+		return result;
+	}
+
+	function FreightNetwork::LoadJunctionList(source, dest) {
+		dest.clear();
+		foreach(j in source) {
+			if(!j.rawin("mergeTile") || j.mergeTile == -1) continue;
+			// leg1Path/leg2Path are essential for connection; skip entries missing them
+			// (they cannot be recovered without the original route's path data).
+			if(!j.rawin("leg1Path") || j.leg1Path == null) continue;
+			if(!j.rawin("leg2Path") || j.leg2Path == null) continue;
+			dest.push(FreightNetwork.CopyJunction(j));
+		}
 	}
 
 	function FreightNetwork::GetMapEdgeDist(tile, isNS) {
@@ -171,6 +171,7 @@ class FreightNetwork {
 			leg1Path = j.leg1Path,
 			leg2Path = j.leg2Path,
 			srcIndustry = j.rawin("srcIndustry") ? j.srcIndustry : -1,
+			destIndustry = j.rawin("destIndustry") ? j.destIndustry : FreightNetwork.state.destIndustry,
 			routeId = j.rawin("routeId") ? j.routeId : null,
 			primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 10,
 			perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 5,
@@ -209,6 +210,154 @@ class FreightNetwork {
 		return false;
 	}
 
+	function FreightNetwork::GetJunctionDestIndustry(junction) {
+		if(junction == null) return null;
+		if(junction.rawin("destIndustry")) return junction.destIndustry;
+		return FreightNetwork.state.destIndustry;
+	}
+
+	function FreightNetwork::HasAvailableJunctionForDest(destIndustry) {
+		if(destIndustry == null) return false;
+		foreach(j in FreightNetwork.availableJunctions) {
+			if(FreightNetwork.GetJunctionDestIndustry(j) != destIndustry) continue;
+			if(!FreightNetwork.IsRouteLive(j.routeId)) continue;
+			return true;
+		}
+		return false;
+	}
+
+	function FreightNetwork::RemoveAvailableJunctionsForDest(destIndustry) {
+		local ji = 0;
+		while(ji < FreightNetwork.availableJunctions.len()) {
+			local j = FreightNetwork.availableJunctions[ji];
+			if(FreightNetwork.GetJunctionDestIndustry(j) == destIndustry) {
+				FreightNetwork.availableJunctions.remove(ji);
+				continue;
+			}
+			ji++;
+		}
+	}
+
+	function FreightNetwork::ActivateAvailableJunctionNetwork() {
+		local ji = 0;
+		while(ji < FreightNetwork.availableJunctions.len()) {
+			local j = FreightNetwork.availableJunctions[ji];
+			if(!FreightNetwork.IsRouteLive(j.routeId)) {
+				FreightNetwork.availableJunctions.remove(ji);
+				continue;
+			}
+			local destIndustry = FreightNetwork.GetJunctionDestIndustry(j);
+			if(destIndustry == null || !AIIndustry.IsValidIndustry(destIndustry)) {
+				FreightNetwork.availableJunctions.remove(ji);
+				continue;
+			}
+			FreightNetwork.state.destIndustry = destIndustry;
+			FreightNetwork.state.destPlace = HgIndustry(destIndustry, false);
+			FreightNetwork.state.lastBuiltRoute = Route.allRoutes[j.routeId];
+			HgLog.Info("FreightNetwork.ActivateAvailableJunctionNetwork: resumed available junctions for "
+				+ AIIndustry.GetName(destIndustry));
+			return true;
+		}
+		return false;
+	}
+
+	function FreightNetwork::DormantJunctionExists(junction) {
+		if(junction == null) return false;
+		foreach(j in FreightNetwork.dormantJunctions) {
+			if(j.mergeTile == junction.mergeTile
+					&& j.rawin("routeId")
+					&& junction.rawin("routeId")
+					&& j.routeId == junction.routeId) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function FreightNetwork::MoveJunctionToDormant(junction) {
+		local dormant = FreightNetwork.CopyJunction(junction);
+		if(!FreightNetwork.DormantJunctionExists(dormant)) {
+			FreightNetwork.dormantJunctions.push(dormant);
+		}
+	}
+
+	function FreightNetwork::PruneDormantJunctions() {
+		local ji = 0;
+		while(ji < FreightNetwork.dormantJunctions.len()) {
+			local j = FreightNetwork.dormantJunctions[ji];
+			if(!FreightNetwork.IsRouteLive(j.routeId)) {
+				HgLog.Info("FreightNetwork.PruneDormantJunctions: dropping dormant junction with removed owner at "
+					+ HgTile(j.mergeTile));
+				FreightNetwork.dormantJunctions.remove(ji);
+				continue;
+			}
+			ji++;
+		}
+	}
+
+	function FreightNetwork::GetRelevantSourceCargo(indId, destIndustry) {
+		if(!AIIndustry.IsValidIndustry(indId)) return -1;
+		if(destIndustry == null || !AIIndustry.IsValidIndustry(destIndustry)) return -1;
+		local srcType = AIIndustry.GetIndustryType(indId);
+		local destType = AIIndustry.GetIndustryType(destIndustry);
+		foreach(dc, _ in AIIndustryType.GetAcceptedCargo(destType)) {
+			if(CargoUtils.IsPaxOrMail(dc)) continue;
+			foreach(pc, _ in AIIndustryType.GetProducedCargo(srcType)) {
+				if(pc != dc) continue;
+				if(AIIndustryType.IsProcessingIndustry(srcType)
+						&& AIIndustry.GetLastMonthProduction(indId, dc) <= 0) {
+					continue;
+				}
+				return dc;
+			}
+		}
+		return -1;
+	}
+
+	function FreightNetwork::OnIndustryOpen(indId) {
+		if(!HogeAI.Get().IsNetworkMode()) return;
+		if(!AIIndustry.IsValidIndustry(indId)) return;
+		FreightNetwork.PruneDormantJunctions();
+		if(FreightNetwork.servedSources.rawin(indId)) return;
+
+		local ji = 0;
+		local revived = 0;
+		while(ji < FreightNetwork.dormantJunctions.len()) {
+			local j = FreightNetwork.dormantJunctions[ji];
+			local destIndustry = FreightNetwork.GetJunctionDestIndustry(j);
+			if(FreightNetwork.GetRelevantSourceCargo(indId, destIndustry) == -1) {
+				ji++;
+				continue;
+			}
+			if(j.rawin("triedIndustries") && j.triedIndustries.rawin(indId)) {
+				ji++;
+				continue;
+			}
+			if(FreightNetwork.AvailableJunctionExists(j)) {
+				FreightNetwork.dormantJunctions.remove(ji);
+				continue;
+			}
+
+			local active = FreightNetwork.CopyJunction(j);
+			active.primaryRadius = 10;
+			active.perpOutRadius = 5;
+			active.perpInRadius = 0;
+			FreightNetwork.availableJunctions.push(active);
+			if(FreightNetwork.state.destIndustry == null) {
+				FreightNetwork.state.destIndustry = destIndustry;
+				FreightNetwork.state.destPlace = HgIndustry(destIndustry, false);
+				FreightNetwork.state.lastBuiltRoute = Route.allRoutes[j.routeId];
+			}
+			FreightNetwork.dormantJunctions.remove(ji);
+			revived++;
+		}
+
+		if(revived > 0) {
+			HgLog.Info("FreightNetwork.OnIndustryOpen: revived dormant junctions=" + revived
+				+ " for " + AIIndustry.GetName(indId));
+		}
+	}
+
 	function FreightNetwork::IsJunctionPathPresent(path) {
 		if(path == null || path.len() < 3) return false;
 		foreach(tile in path) {
@@ -242,9 +391,9 @@ class FreightNetwork {
 		if(route instanceof TrainRoute
 				&& route.parentRouteId != null
 				&& Route.allRoutes.rawin(route.parentRouteId)) {
-			local parent = Route.allRoutes[route.parentRouteId];
-			if(parent.IsRemoved()) {
-				FreightNetwork.RestoreConsumedJunctionForRoute(parent);
+			local parentRoute = Route.allRoutes[route.parentRouteId];
+			if(parentRoute.IsRemoved()) {
+				FreightNetwork.RestoreConsumedJunctionForRoute(parentRoute);
 			}
 		}
 	}
@@ -625,6 +774,11 @@ class FreightNetwork {
 		local srcIndustry = (srcLoc != -1)
 			? (route.srcHgStation.place instanceof HgIndustry ? route.srcHgStation.place.industry : -1)
 			: -1;
+		local destIndustry = (route.destHgStation != null
+				&& route.destHgStation.place != null
+				&& (route.destHgStation.place instanceof HgIndustry))
+			? route.destHgStation.place.industry
+			: FreightNetwork.state.destIndustry;
 
 		// Determine leg1/leg2 now, while we have the route's pathSrcToDest available.
 		// leg1Path deepest tile must be on pathSrcToDest (spine forward track, spur→dest).
@@ -653,6 +807,7 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
+					destIndustry = destIndustry,
 					routeId = route.id,
 					primaryRadius = 10,
 					perpOutRadius = 5,
@@ -683,6 +838,7 @@ class FreightNetwork {
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
 					srcIndustry = srcIndustry,
+					destIndustry = destIndustry,
 					routeId = route.id,
 					primaryRadius = 10,
 					perpOutRadius = 5,
@@ -723,7 +879,7 @@ class FreightNetwork {
 		local maxSources = 8;
 		if(destSrcCount >= maxSources) {
 			HgLog.Info("FreightNetwork.SearchAndConnect: dest already has " + maxSources + " sources, stop connecting more sources");
-			FreightNetwork.availableJunctions.clear();
+			FreightNetwork.RemoveAvailableJunctionsForDest(FreightNetwork.state.destIndustry);
 			return false;
 		}
 		local destTile = AIIndustry.GetLocation(FreightNetwork.state.destIndustry);
@@ -747,6 +903,10 @@ class FreightNetwork {
 			local anyActive = false;
 			while(ji < FreightNetwork.availableJunctions.len()) {
 				local junc = FreightNetwork.availableJunctions[ji];
+				if(FreightNetwork.GetJunctionDestIndustry(junc) != FreightNetwork.state.destIndustry) {
+					ji++;
+					continue;
+				}
 				local mergeTile = junc.mergeTile;
 				if(mergeTile == -1) {
 					FreightNetwork.availableJunctions.remove(ji);
@@ -771,6 +931,7 @@ class FreightNetwork {
 				if(pFarX < 1 || pFarX >= mapW - 1 || pFarY < 1 || pFarY >= mapH - 1) {
 					HgLog.Info("FreightNetwork.SearchAndConnect: junction exhausted at "
 						+ HgTile(mergeTile));
+					FreightNetwork.MoveJunctionToDormant(junc);
 					FreightNetwork.availableJunctions.remove(ji);
 					continue;
 				}
@@ -835,6 +996,9 @@ class FreightNetwork {
 						+ AIIndustry.GetName(found.industry) + " at " + HgTile(found.tile));
 
 					local spineRoute = FreightNetwork.state.lastBuiltRoute;
+					if(junc.rawin("routeId") && Route.allRoutes.rawin(junc.routeId)) {
+						spineRoute = Route.allRoutes[junc.routeId];
+					}
 					if(spineRoute == null) {
 						HgLog.Warning("FreightNetwork.SearchAndConnect: lastBuiltRoute null, skipping");
 						FreightNetwork.availableJunctions.remove(ji);
