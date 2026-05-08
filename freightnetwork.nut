@@ -65,7 +65,8 @@ class FreightNetwork {
 				routeId = j.rawin("routeId") ? j.routeId : null,
 				primaryRadius = j.primaryRadius,
 				perpOutRadius = j.perpOutRadius,
-				perpInRadius = j.perpInRadius
+				perpInRadius = j.perpInRadius,
+				triedIndustries = j.rawin("triedIndustries") ? j.triedIndustries : {}
 			});
 		}
 		table.freightNetwork <- {
@@ -108,7 +109,7 @@ class FreightNetwork {
 				primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 0,
 				perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 0,
 				perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
-				triedIndustries = {}
+				triedIndustries = j.rawin("triedIndustries") ? j.triedIndustries : {}
 			});
 		}
 		FreightNetwork.state.destPlace = null;
@@ -174,7 +175,7 @@ class FreightNetwork {
 			primaryRadius = j.rawin("primaryRadius") ? j.primaryRadius : 10,
 			perpOutRadius = j.rawin("perpOutRadius") ? j.perpOutRadius : 5,
 			perpInRadius = j.rawin("perpInRadius") ? j.perpInRadius : 0,
-			triedIndustries = {}
+			triedIndustries = j.rawin("triedIndustries") ? j.triedIndustries : {}
 		};
 	}
 
