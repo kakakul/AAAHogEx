@@ -4106,8 +4106,9 @@ class CommonRouteBuilder extends RouteBuilder {
 			ClearRollback();
 			route.instances.push(route); // ChooseEngine内、インフラコスト計算に必要
 			if(!isWaitingProduction && !isWaitingDestRoute) {
-				if(route.BuildVehicleFirst() == null && HogeAI.Get().IsInfrastructureMaintenance()) {
-					HgLog.Warning("route Remove.(route.BuildVehicleFirst() == null && IsInfrastructureMaintenance)"+route);
+				local requireFirstVehicle = GetOption("requireFirstVehicle", false);
+				if(route.BuildVehicleFirst() == null && (HogeAI.Get().IsInfrastructureMaintenance() || requireFirstVehicle)) {
+					HgLog.Warning("route Remove.(route.BuildVehicleFirst() == null)"+route);
 					route.isBuilding = false;
 					route.Remove();
 					return null;

@@ -78,13 +78,23 @@ class PaxMailNetwork {
 			isBiDirectional = true,
 			routeClass = routeClass,
 			allowNetworkSourceReuse = true,
+			requireFirstVehicle = true,
 			explain    = "GlobalConnect("+label+") "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
 		};
 	}
 
+	function PaxMailNetwork::MaybeUseCandidate(best, connTown, unservedTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label) {
+		if(estimate == null) return best;
+		local score = estimate.value - dist;
+		if(best != null && best.score >= score) return best;
+		local candidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
+			vehicleType, routeClass, estimate, dist, production, label);
+		candidate.score <- score;
+		return candidate;
+	}
+
 	// For a given unserved town, find the nearest connected town that has any profitable
-	// road, water, rail, or air candidate. Within that one town pair, use the highest-value
-	// vehicle type.
+	// road, water, rail, or air candidate by route_score = estimate.value - distance.
 	function PaxMailNetwork::FindBestProfitableRouteForTown(unservedTown, connected, paxCargo) {
 		local townLoc = AITown.GetLocation(unservedTown);
 		local townPop = AITown.GetPopulation(unservedTown);
@@ -111,18 +121,14 @@ class PaxMailNetwork {
 			local src = TownCargo(connTown, paxCargo, true);
 			local dest = TownCargo(unservedTown, paxCargo, true);
 			local bestCandidate = null;
-			local bestValue = 0;
 
 			// Road: shortest practical town-to-town connector when land-connected.
 			if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
 					&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
 				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
 				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
-				if(est != null && est.value > bestValue) {
-					bestValue = est.value;
-					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
-						AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road");
-				}
+				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+					AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road");
 			}
 
 			// Water: useful when the nearest pair can be joined by sea/canal.
@@ -130,23 +136,18 @@ class PaxMailNetwork {
 					&& WaterRoute.CanBuild(src, dest, paxCargo, true)) {
 				local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
 				local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
-				if(est != null && est.value > bestValue) {
-					bestValue = est.value;
-					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
-						AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship");
-				}
+				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+					AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship");
 			}
 
 			// Rail: good for medium distances
-			if(!TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
+			if(dist >= 50
+					&& !TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
 					&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
 				local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
 				local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
-				if(est != null && est.value > bestValue) {
-					bestValue = est.value;
-					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
-						AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail");
-				}
+				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+					AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail");
 			}
 
 			// Air: good for long distances when profitable
@@ -154,11 +155,8 @@ class PaxMailNetwork {
 				local infraTypes = AirRoute.GetSuitableInfrastractureTypes(
 					src, dest, paxCargo);
 				local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
-				if(est != null && est.value > bestValue) {
-					bestValue = est.value;
-					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
-						AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air");
-				}
+				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+					AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air");
 			}
 
 			if(bestCandidate != null) return bestCandidate;

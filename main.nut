@@ -1204,7 +1204,8 @@ class HogeAI extends AIController {
 				destRoute==null && t.estimate.destRouteCargoIncome == 0 && t.estimate.additionalRouteIncome == 0
 			estimate = t.estimate
 			limitDate = limitDate
-		notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
+			notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
+			requireFirstVehicle = t.rawin("requireFirstVehicle") ? t.requireFirstVehicle : false
 		});
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);
