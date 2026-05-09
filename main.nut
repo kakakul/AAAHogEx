@@ -985,8 +985,8 @@ class HogeAI extends AIController {
 	}
 
 	function ConnectUnservedTowns() {
-		HgLog.Info("###### ConnectUnservedTowns");
 		if(IsFreightOnly()) return;
+		HgLog.Info("###### ConnectUnservedTowns");
 		if(GetUsableMoney() < GetInflatedMoney(100000)) return;
 
 		local paxCargo = GetPassengerCargo();

@@ -28,8 +28,8 @@ class FreightNetwork {
 }
 
 	function FreightNetwork::Step() {
-		HgLog.Info("###### FreightNetwork.Step");
 		if(HogeAI.Get().IsPaxMailOnly()) return;
+		HgLog.Info("###### FreightNetwork.Step");
 		// Guard against stale destIndustry after game load (industry may have closed).
 		if(FreightNetwork.state.destIndustry != null && FreightNetwork.state.destPlace == null) {
 			HgLog.Warning("FreightNetwork.Step: destPlace null after load, resetting network");
