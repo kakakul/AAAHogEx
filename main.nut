@@ -985,6 +985,7 @@ class HogeAI extends AIController {
 	}
 
 	function ConnectUnservedTowns() {
+		HgLog.Info("###### ConnectUnservedTowns");
 		if(IsFreightOnly()) return;
 		if(GetUsableMoney() < GetInflatedMoney(100000)) return;
 
@@ -1157,8 +1158,11 @@ class HogeAI extends AIController {
 	}
 
 	function _ScanPlaces() {
+		if(IsNetworkMode()) {
+			HgLog.Info("ScanPlaces: skipped in network mode");
+			return;
+		}
 		HgLog.Info("###### Scan places");
-		if(IsNetworkMode()) return;
 
 		if(/*IsForceToHandleFright() &&*/ isTimeoutToMeetSrcDemand) { // Airやるだけなら良いが、余計なルートを作ってsupply chainを混乱させる事があったのでコメントアウト
 			return;

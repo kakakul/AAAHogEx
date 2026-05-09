@@ -3201,7 +3201,7 @@ class TrainRouteBuilder extends RouteBuilder {
 			SetBuilt("engineSet",engineSet);
 		}
 		local useSingle = engineSet.isSingle; //HogeAI.Get().GetUsableMoney() < HogeAI.Get().GetInflatedMoney(100000) && !HogeAI.Get().HasIncome(20000);
-		if(!CargoUtils.IsPaxOrMail(cargo)) {
+		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
 			useSingle = false; // Force freight lines to be double tracked
 		}
 		if(useSingle) {
@@ -3390,18 +3390,6 @@ class TrainRouteBuilder extends RouteBuilder {
 		PlaceDictionary.Get().AddRoute(route);
 
 		route.RegisterRailUsage();
-
-		// For long double-tracked freight routes, add a Y-junction
-		// near to each station to enable future network connections.
-		if(!useSingle && !CargoUtils.IsPaxOrMail(cargo)
-				&& !HogeAI.Get().IsNetworkMode()
-				&& route.pathDestToSrc != null
-				&& route.pathSrcToDest.array_.len() > 40) {
-			local arr1 = route.pathSrcToDest.array_;
-			local arr2 = route.pathDestToSrc.array_;
-			FourWayJunction.TryBuildNearStation(arr1, arr2, 10, 30, false); // near dest
-			FourWayJunction.TryBuildNearStation(arr2, arr1, 10, 30, true);  // near source
-		}
 
 		if(CargoUtils.IsPaxOrMail(cargo)) {
 			CommonRouteBuilder.CheckTownTransfer(route, srcHgStation);
