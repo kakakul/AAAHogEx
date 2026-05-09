@@ -3201,8 +3201,8 @@ class TrainRouteBuilder extends RouteBuilder {
 			SetBuilt("engineSet",engineSet);
 		}
 		local useSingle = engineSet.isSingle; //HogeAI.Get().GetUsableMoney() < HogeAI.Get().GetInflatedMoney(100000) && !HogeAI.Get().HasIncome(20000);
-		if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
-			useSingle = false; // Force freight lines to be double tracked
+		if(HogeAI.Get().IsNetworkMode()) {
+			useSingle = false; // Force network-mode train routes to be double tracked
 		}
 		if(useSingle) {
 			idealDistance = distance;
