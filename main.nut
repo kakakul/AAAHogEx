@@ -1044,7 +1044,6 @@ class HogeAI extends AIController {
 
 			local destKey = TownCargo(unservedTown, paxCargo, true).GetFacilityId() + ":" + paxCargo;
 			if(dirtyPlaces.rawin(destKey)) {
-				connected.rawset(unservedTown, true);
 				continue;
 			}
 
@@ -1077,6 +1076,7 @@ class HogeAI extends AIController {
 							}
 						}
 						built++;
+						connected = GetPassengerServedTowns(paxCargo);
 					}
 				}
 				routeCandidates.Extend(pendingPlans);
@@ -1086,7 +1086,6 @@ class HogeAI extends AIController {
 				// --- Fallback: bus route to nearest connected town ---
 				local nearest = FindNearestConnectedTown(unservedTown, connected);
 				if(nearest.town == -1) {
-					connected.rawset(unservedTown, true);
 					continue;
 				}
 				local connTown = nearest.town;
@@ -1097,7 +1096,6 @@ class HogeAI extends AIController {
 				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, production, true, infraTypes);
 				if(est == null || est.value <= 0) {
 					HgLog.Info("ConnectUnservedTowns: no viable route for "+AITown.GetName(unservedTown)+", skipping");
-					connected.rawset(unservedTown, true);
 					continue;
 				}
 				local busCandidate = {
@@ -1136,13 +1134,13 @@ class HogeAI extends AIController {
 							}
 						}
 						built++;
+						connected = GetPassengerServedTowns(paxCargo);
 					}
 				}
 				routeCandidates.Extend(pendingPlans);
 				pendingPlans.clear();
 			}
 
-			connected.rawset(unservedTown, true);
 		}
 
 		HgLog.Info("} ConnectUnservedTowns built:"+built);
