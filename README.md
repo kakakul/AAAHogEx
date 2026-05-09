@@ -8,7 +8,7 @@ HogNet is a fork of AAAHogEx. The original AAAHogEx is designed to maximise prof
 A new routine runs continuously in the background. It identifies every town that has no passenger service and methodically works to connect it to the existing network. It tries profitable options first (rail, air) and falls back to a road bus route if needed. No town is left behind.
 
 **No isolated route clusters**
-In AAAHogEx, the AI may build profitable routes in completely separate parts of the map, resulting in disconnected islands of service. HogNet rejects any passenger or mail route that would form an isolated island — both endpoints of a new route must have at least one connection to the existing network. The whole map converges toward one unified transport system.
+In AAAHogEx, the AI may build profitable routes in completely separate parts of the map, resulting in disconnected islands of service. HogNet rejects any passenger or mail route that would form an isolated island — at least one endpoint of a new route must have a connection to the existing network. The whole map converges toward one unified transport system.
 
 ## Intra-Town Feeder Routes
 **Feeder bus and truck routes within towns**
