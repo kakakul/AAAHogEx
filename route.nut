@@ -1413,7 +1413,11 @@ class Route {
 				ReOpen();
 			}
 
-			if(!IsSupportRaw() && !(HogeAI.Get().IsNetworkMode() && IsSrcTransfer()) && (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
+			if(!IsSupportRaw()
+					&& !(HogeAI.Get().IsNetworkMode()
+						&& (IsSrcTransfer()
+							|| (GetVehicleType() == AIVehicle.VT_ROAD && CargoUtils.IsPaxOrMail(cargo))))
+					&& (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
 				local routes = [];
 				if(srcHgStation.place != null) {
 					routes.extend(PlaceDictionary.Get().GetUsedAsSourceByPriorityRoute(srcHgStation.place, cargo));

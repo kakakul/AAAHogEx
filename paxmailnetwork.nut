@@ -22,25 +22,69 @@ class PaxMailNetwork {
 	}
 
 	// Returns all towns that have at least one passenger route (any vehicle type).
+	function PaxMailNetwork::AddServedTownFromStation(served, station) {
+		if(station == null) return;
+		if(station.place != null && station.place instanceof TownCargo) {
+			served.rawset(station.place.town, true);
+		}
+		if(station.stationGroup == null) return;
+		foreach(hgStation in station.stationGroup.hgStations) {
+			if(hgStation.place != null && hgStation.place instanceof TownCargo) {
+				served.rawset(hgStation.place.town, true);
+			}
+		}
+	}
+
 	function PaxMailNetwork::GetPassengerServedTowns(paxCargo) {
 		local served = {};
 		foreach(route in Route.GetAllRoutes()) {
 			if(!route.HasCargo(paxCargo)) continue;
-			local srcPlace = route.srcHgStation != null ? route.srcHgStation.place : null;
-			local destPlace = route.destHgStation != null ? route.destHgStation.place : null;
-			if(srcPlace != null && srcPlace instanceof TownCargo) {
-				served.rawset(srcPlace.town, true);
-			}
-			if(destPlace != null && destPlace instanceof TownCargo) {
-				served.rawset(destPlace.town, true);
-			}
+			PaxMailNetwork.AddServedTownFromStation(served, route.srcHgStation);
+			PaxMailNetwork.AddServedTownFromStation(served, route.destHgStation);
 		}
 		return served;
 	}
 
-	// For a given unserved town, find the best profitable route to any connected town.
-	// Tries rail and air; returns the highest-value candidate, or null if none is profitable.
-	// For each unserved town the nearest N connected towns are evaluated to keep runtime bounded.
+	function PaxMailNetwork::GetNearestConnectedDistance(town, connected) {
+		local townLoc = AITown.GetLocation(town);
+		local bestDist = 99999999;
+		foreach(connTown, _ in connected) {
+			local d = AIMap.DistanceManhattan(townLoc, AITown.GetLocation(connTown));
+			if(d > 0 && d < bestDist) {
+				bestDist = d;
+			}
+		}
+		return bestDist;
+	}
+
+	function PaxMailNetwork::SortTownsByNetworkDistance(towns, connected) {
+		towns.sort(function(a, b):(connected) {
+			local da = PaxMailNetwork.GetNearestConnectedDistance(a, connected);
+			local db = PaxMailNetwork.GetNearestConnectedDistance(b, connected);
+			if(da != db) return da - db;
+			return AITown.GetPopulation(b) - AITown.GetPopulation(a);
+		});
+	}
+
+	function PaxMailNetwork::MakeCandidate(connTown, unservedTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label) {
+		return {
+			src        = TownCargo(connTown, paxCargo, true),
+			dest       = TownCargo(unservedTown, paxCargo, true),
+			vehicleType = vehicleType,
+			estimate   = clone estimate,
+			cargo      = paxCargo,
+			distance   = dist,
+			production = production,
+			isBiDirectional = true,
+			routeClass = routeClass,
+			allowNetworkSourceReuse = true,
+			explain    = "GlobalConnect("+label+") "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
+		};
+	}
+
+	// For a given unserved town, find the nearest connected town that has any profitable
+	// road, water, rail, or air candidate. Within that one town pair, use the highest-value
+	// vehicle type.
 	function PaxMailNetwork::FindBestProfitableRouteForTown(unservedTown, connected, paxCargo) {
 		local townLoc = AITown.GetLocation(unservedTown);
 		local townPop = AITown.GetPopulation(unservedTown);
@@ -55,8 +99,6 @@ class PaxMailNetwork {
 		}
 		byDist.sort(function(a, b) { return a.dist - b.dist; });
 
-		local bestCandidate = null;
-		local bestValue = 0;
 		// Only evaluate up to 15 nearest connected towns to keep this step fast
 		local limit = min(byDist.len(), 15);
 
@@ -65,69 +107,64 @@ class PaxMailNetwork {
 			local dist = byDist[i].dist;
 			if(dist == 0) continue;
 			local connPop = AITown.GetPopulation(connTown);
-			local production = max(30, min((townPop + connPop) / 20, 550));
+			local production = max(30, (townPop + connPop) / 20);
+			local src = TownCargo(connTown, paxCargo, true);
+			local dest = TownCargo(unservedTown, paxCargo, true);
+			local bestCandidate = null;
+			local bestValue = 0;
 
-			// Rail: good for medium distances
-			if(!TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)) {
-				local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
-				local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, production, true, infraTypes);
+			// Road: shortest practical town-to-town connector when land-connected.
+			if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
+					&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
+				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
+				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
 				if(est != null && est.value > bestValue) {
 					bestValue = est.value;
-					bestCandidate = {
-						src        = TownCargo(connTown, paxCargo, true),
-						dest       = TownCargo(unservedTown, paxCargo, true),
-						vehicleType = AIVehicle.VT_RAIL,
-						estimate   = clone est,
-						cargo      = paxCargo,
-						distance   = dist,
-						production = production,
-						isBiDirectional = true,
-						routeClass = TrainRoute,
-						explain    = "GlobalConnect(rail) "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
-					};
+					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
+						AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road");
+				}
+			}
+
+			// Water: useful when the nearest pair can be joined by sea/canal.
+			if(!WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)
+					&& WaterRoute.CanBuild(src, dest, paxCargo, true)) {
+				local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
+				local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
+				if(est != null && est.value > bestValue) {
+					bestValue = est.value;
+					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
+						AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship");
+				}
+			}
+
+			// Rail: good for medium distances
+			if(!TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
+					&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
+				local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
+				local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
+				if(est != null && est.value > bestValue) {
+					bestValue = est.value;
+					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
+						AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail");
 				}
 			}
 
 			// Air: good for long distances when profitable
 			if(!AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
 				local infraTypes = AirRoute.GetSuitableInfrastractureTypes(
-					TownCargo(connTown, paxCargo, true),
-					TownCargo(unservedTown, paxCargo, true), paxCargo);
-				local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, production, true, infraTypes);
+					src, dest, paxCargo);
+				local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
 				if(est != null && est.value > bestValue) {
 					bestValue = est.value;
-					bestCandidate = {
-						src        = TownCargo(connTown, paxCargo, true),
-						dest       = TownCargo(unservedTown, paxCargo, true),
-						vehicleType = AIVehicle.VT_AIR,
-						estimate   = clone est,
-						cargo      = paxCargo,
-						distance   = dist,
-						production = production,
-						isBiDirectional = true,
-						routeClass = AirRoute,
-						explain    = "GlobalConnect(air) "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
-					};
+					bestCandidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
+						AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air");
 				}
 			}
+
+			if(bestCandidate != null) return bestCandidate;
 		}
 
-		return bestCandidate; // null if nothing is profitable
-	}
-
-	// Find the nearest connected town to use as bus partner for small/unprofitable towns.
-	function PaxMailNetwork::FindNearestConnectedTown(unservedTown, connected) {
-		local townLoc = AITown.GetLocation(unservedTown);
-		local bestTown = -1;
-		local bestDist = 99999999;
-		foreach(connTown, _ in connected) {
-			local d = AIMap.DistanceManhattan(townLoc, AITown.GetLocation(connTown));
-			if(d > 0 && d < bestDist) {
-				bestDist = d;
-				bestTown = connTown;
-			}
-		}
-		return {town = bestTown, dist = bestDist};
+		return null; // null if nothing is profitable
 	}
 
 	function PaxMailNetwork::Step() {
@@ -142,7 +179,8 @@ class PaxMailNetwork {
 		// No point running if all vehicle types are saturated
 		if(TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
 				&& AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)
-				&& RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)) {
+				&& RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
+				&& WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)) {
 			return;
 		}
 
@@ -181,9 +219,12 @@ class PaxMailNetwork {
 		local built = 0;
 		local dirtyPlaces = {};
 		local pendingPlans = [];
+		local remaining = unserved;
 
-		foreach(unservedTown in unserved) {
-			if(built >= maxNew) break;
+		while(remaining.len() > 0 && built < maxNew) {
+			PaxMailNetwork.SortTownsByNetworkDistance(remaining, connected);
+			local unservedTown = remaining[0];
+			remaining.remove(0);
 			if(ai.limitDate < AIDate.GetCurrentDate()) {
 				HgLog.Warning("ConnectUnservedTowns: reached limitDate");
 				break;
@@ -194,7 +235,7 @@ class PaxMailNetwork {
 				continue;
 			}
 
-			// --- Try rail or air (profitable routes only) ---
+			// --- Try nearest profitable road, water, rail, or air route ---
 			local candidate = PaxMailNetwork.FindBestProfitableRouteForTown(unservedTown, connected, paxCargo);
 
 			if(candidate != null) {
@@ -213,79 +254,23 @@ class PaxMailNetwork {
 							if(newRoute.srcHgStation.place != null) {
 								newRoute.srcHgStation.place.SetDirtyArround();
 							}
-							foreach(c, _ in newRoute.GetEngineCargos()) {
-								if(newRoute.srcHgStation.place != null) {
-									dirtyPlaces.rawset(newRoute.srcHgStation.place.GetFacilityId()+":"+c, true);
-								}
-								if(newRoute.IsBiDirectional() && newRoute.destHgStation.place != null) {
-									dirtyPlaces.rawset(newRoute.destHgStation.place.GetFacilityId()+":"+c, true);
-								}
-							}
 						}
 						built++;
 						connected = PaxMailNetwork.GetPassengerServedTowns(paxCargo);
+						if(candidate.src instanceof TownCargo) connected.rawset(candidate.src.town, true);
+						if(candidate.dest instanceof TownCargo) connected.rawset(candidate.dest.town, true);
+						local filteredRemaining = [];
+						foreach(town in remaining) {
+							if(!connected.rawin(town)) filteredRemaining.push(town);
+						}
+						remaining = filteredRemaining;
 					}
 				}
 				ai.routeCandidates.Extend(pendingPlans);
 				pendingPlans.clear();
 
-			} else if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)) {
-				// --- Fallback: bus route to nearest connected town ---
-				local nearest = PaxMailNetwork.FindNearestConnectedTown(unservedTown, connected);
-				if(nearest.town == -1) {
-					continue;
-				}
-				local connTown = nearest.town;
-				local dist = nearest.dist;
-				local production = max(30, min(
-					(AITown.GetPopulation(unservedTown) + AITown.GetPopulation(connTown)) / 20, 340));
-				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
-				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, production, true, infraTypes);
-				if(est == null || est.value <= 0) {
-					HgLog.Info("ConnectUnservedTowns: no viable route for "+AITown.GetName(unservedTown)+", skipping");
-					continue;
-				}
-				local busCandidate = {
-					src        = TownCargo(connTown, paxCargo, true),
-					dest       = TownCargo(unservedTown, paxCargo, true),
-					vehicleType = AIVehicle.VT_ROAD,
-					estimate   = clone est,
-					cargo      = paxCargo,
-					distance   = dist,
-					production = production,
-					isBiDirectional = true,
-					routeClass = RoadRoute,
-					score      = est.value,
-					maxValue   = est.value,
-					explain    = "GlobalConnect(bus) "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
-				};
-				ai.DoInterval();
-				local builder = ai.CreateBuilder(busCandidate, pendingPlans, dirtyPlaces, ai.limitDate);
-				if(builder != null) {
-					HgLog.Info("ConnectUnservedTowns: "+busCandidate.explain+" {");
-					local newRoutes = builder.Build();
-					HgLog.Info("} ConnectUnservedTowns bus build");
-					if(newRoutes != null) {
-						if(typeof newRoutes != "array") newRoutes = [newRoutes];
-						foreach(newRoute in newRoutes) {
-							if(newRoute.srcHgStation.place != null) {
-								newRoute.srcHgStation.place.SetDirtyArround();
-							}
-							foreach(c, _ in newRoute.GetEngineCargos()) {
-								if(newRoute.srcHgStation.place != null) {
-									dirtyPlaces.rawset(newRoute.srcHgStation.place.GetFacilityId()+":"+c, true);
-								}
-								if(newRoute.IsBiDirectional() && newRoute.destHgStation.place != null) {
-									dirtyPlaces.rawset(newRoute.destHgStation.place.GetFacilityId()+":"+c, true);
-								}
-							}
-						}
-						built++;
-						connected = PaxMailNetwork.GetPassengerServedTowns(paxCargo);
-					}
-				}
-				ai.routeCandidates.Extend(pendingPlans);
-				pendingPlans.clear();
+			} else {
+				HgLog.Info("ConnectUnservedTowns: no viable route for "+AITown.GetName(unservedTown)+", skipping");
 			}
 
 		}

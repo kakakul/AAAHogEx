@@ -1142,7 +1142,8 @@ class HogeAI extends AIController {
 			HgLog.Info("dirtyPlaces srcPlace "+t.srcPlace+" "+explain);
 			return null;
 		}
-		if(!t.src.CanUseNewRoute(t.cargo, t.vehicleType)) {
+		if(!(IsNetworkMode() && t.rawin("allowNetworkSourceReuse") && t.allowNetworkSourceReuse)
+				&& !t.src.CanUseNewRoute(t.cargo, t.vehicleType)) {
 			HgLog.Info("Not CanUseNewRoute src "+explain);
 			return null;
 		}
