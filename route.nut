@@ -2213,9 +2213,8 @@ class CommonRoute extends Route {
 		local isBiDirectional = IsBiDirectional();
 		local isRoadRoute = GetVehicleType() == AIVehicle.VT_ROAD;
 		local isNetworkMode = HogeAI.Get().IsNetworkMode();
-		local noFullLoadCargo = isNetworkMode && CargoUtils.IsPaxOrMail(cargo);
-		local effectiveSrcFullLoad = isSrcFullLoadOrder && !noFullLoadCargo;
-		local effectiveDestFullLoad = isDestFullLoadOrder && !noFullLoadCargo;
+		local effectiveSrcFullLoad = isSrcFullLoadOrder;
+		local effectiveDestFullLoad = isDestFullLoadOrder;
 		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (effectiveSrcFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		local srcOrderPosition = AIOrder.GetOrderCount(vehicle);
 		if(isBiDirectional) {
@@ -3118,7 +3117,10 @@ class CommonRoute extends Route {
 			list.Valuate(AIVehicle.GetCurrentSpeed);
 			list.KeepValue(0);
 			
-			return list.Count() >= (IsTownTransferRoute() ? 4 : 2);
+			local threshold = HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo)
+				? (IsTownTransferRoute() ? 4 : 3)
+				: (IsTownTransferRoute() ? 4 : 2);
+			return list.Count() >= threshold;
 /*			
 			foreach(v,_ in list) {
 				if(AIVehicle.GetState(v) == AIVehicle.VS_AT_STATION) {
@@ -3145,7 +3147,8 @@ class CommonRoute extends Route {
 			list.AddList(vehicles);
 			list.Valuate(AIVehicle.GetState);
 			list.KeepValue(AIVehicle.VS_AT_STATION);
-			return list.Count() >= 1;
+			local threshold = HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo) ? 3 : 1;
+			return list.Count() >= threshold;
 		}	
 		return false;
 	}

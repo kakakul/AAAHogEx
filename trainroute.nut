@@ -1480,9 +1480,7 @@ class TrainRoute extends Route {
 	function BuildOrder(engineVehicle) {
 		local execMode = AIExecMode();
 		local isNetworkMode = HogeAI.Get().IsNetworkMode();
-		local loadOrderFlags = isNetworkMode && CargoUtils.IsPaxOrMail(cargo)
-			? AIOrder.OF_NON_STOP_INTERMEDIATE
-			: AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE;
+		local loadOrderFlags = AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE;
 		AIOrder.AppendOrder(engineVehicle, srcHgStation.platformTile, loadOrderFlags);
 		AIOrder.SetStopLocation	(engineVehicle, AIOrder.GetOrderCount(engineVehicle)-1, AIOrder.STOPLOCATION_MIDDLE);
 		AIOrder.AppendOrder(engineVehicle, srcDepot, AIOrder.OF_SERVICE_IF_NEEDED);
