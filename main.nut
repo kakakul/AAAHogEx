@@ -1147,7 +1147,9 @@ class HogeAI extends AIController {
 			HgLog.Info("Not CanUseNewRoute src "+explain);
 			return null;
 		}
-		if(t.isBiDirectional && !t.dest.CanUseNewRoute(t.cargo, t.vehicleType)) {
+		if(t.isBiDirectional
+				&& !(IsNetworkMode() && t.rawin("allowNetworkDestReuse") && t.allowNetworkDestReuse)
+				&& !t.dest.CanUseNewRoute(t.cargo, t.vehicleType)) {
 			HgLog.Info("Not CanUseNewRoute dest:"+t.dest+" "+explain);
 			return null;
 		}
@@ -1195,7 +1197,7 @@ class HogeAI extends AIController {
 			}
 		}
 		
-		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, { 
+		local builderOptions = {
 			pendingToDoPostBuild = false //roiBase ? true : false
 			destRoute = destRoute!=null ? destRoute.id : null
 			sourceRoute = sourceRoute!=null ? sourceRoute.id : null
@@ -1207,7 +1209,17 @@ class HogeAI extends AIController {
 			notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
 			requireFirstVehicle = t.rawin("requireFirstVehicle") ? t.requireFirstVehicle : false
 			routeTraceId = t.rawin("routeTraceId") ? t.routeTraceId : null
-		});
+		};
+		if(t.rawin("transfer")) {
+			builderOptions.transfer <- t.transfer;
+		}
+		if(t.rawin("checkSharableStationFirst")) {
+			builderOptions.checkSharableStationFirst <- t.checkSharableStationFirst;
+		}
+		if(t.rawin("sharableStationOnly")) {
+			builderOptions.sharableStationOnly <- t.sharableStationOnly;
+		}
+		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, builderOptions);
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);
 			return null;

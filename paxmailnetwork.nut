@@ -31,7 +31,9 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::AddPairBlacklist(candidate, reason) {
-		local key = PaxMailNetwork.GetPairKey(candidate.src.town, candidate.dest.town, candidate.cargo, candidate.vehicleType);
+		local srcTown = candidate.rawin("connTown") ? candidate.connTown : candidate.src.town;
+		local destTown = candidate.rawin("destTown") ? candidate.destTown : candidate.dest.town;
+		local key = PaxMailNetwork.GetPairKey(srcTown, destTown, candidate.cargo, candidate.vehicleType);
 		local limitDate = AIDate.GetCurrentDate() + 365 * 2;
 		PaxMailNetwork.state.pairBlacklist.rawset(key, limitDate);
 		HgLog.Info("PaxMailNetwork.BlacklistAdd id:"+candidate.routeTraceId
@@ -138,6 +140,106 @@ class PaxMailNetwork {
 		return served;
 	}
 
+	function PaxMailNetwork::AddTownFromStation(towns, station) {
+		if(station == null) return;
+		if(station.place != null && station.place instanceof TownCargo) {
+			towns.rawset(station.place.town, true);
+		}
+		if(station.stationGroup == null) return;
+		foreach(hgStation in station.stationGroup.hgStations) {
+			if(hgStation.place != null && hgStation.place instanceof TownCargo) {
+				towns.rawset(hgStation.place.town, true);
+			}
+		}
+	}
+
+	function PaxMailNetwork::GetRouteTowns(route, isSrc) {
+		local towns = {};
+		PaxMailNetwork.AddTownFromStation(towns, isSrc ? route.srcHgStation : route.destHgStation);
+		return towns;
+	}
+
+	function PaxMailNetwork::GetRouteGraphDistance(route) {
+		if("pathDistance" in route && route.pathDistance != null && route.pathDistance > 0) {
+			return route.pathDistance;
+		}
+		return route.GetDistance();
+	}
+
+	function PaxMailNetwork::AddGraphEdge(graph, fromTown, toTown, distance) {
+		if(fromTown == toTown) return;
+		if(!graph.rawin(fromTown)) graph.rawset(fromTown, {});
+		local edges = graph[fromTown];
+		if(!edges.rawin(toTown) || distance < edges[toTown]) {
+			edges.rawset(toTown, distance);
+		}
+	}
+
+	function PaxMailNetwork::GetNetworkGraph(paxCargo, connected) {
+		local graph = {};
+		foreach(route in Route.GetAllRoutes()) {
+			if(!route.HasCargo(paxCargo)) continue;
+			if(route.srcHgStation == null || route.destHgStation == null) continue;
+			local srcTowns = PaxMailNetwork.GetRouteTowns(route, true);
+			local destTowns = PaxMailNetwork.GetRouteTowns(route, false);
+			local distance = PaxMailNetwork.GetRouteGraphDistance(route);
+			foreach(srcTown, _ in srcTowns) {
+				if(!connected.rawin(srcTown)) continue;
+				foreach(destTown, _ in destTowns) {
+					if(!connected.rawin(destTown)) continue;
+					PaxMailNetwork.AddGraphEdge(graph, srcTown, destTown, distance);
+					if(route.IsBiDirectional() || HogeAI.Get().IsNetworkMode()) {
+						PaxMailNetwork.AddGraphEdge(graph, destTown, srcTown, distance);
+					}
+				}
+			}
+		}
+		return graph;
+	}
+
+	function PaxMailNetwork::GetShortestNetworkDistance(graph, fromTown, toTown) {
+		if(fromTown == toTown) return 0;
+		local dist = {};
+		local done = {};
+		dist.rawset(fromTown, 0);
+
+		while(true) {
+			local bestTown = null;
+			local bestDist = 99999999;
+			foreach(town, d in dist) {
+				if(done.rawin(town)) continue;
+				if(d < bestDist) {
+					bestDist = d;
+					bestTown = town;
+				}
+			}
+			if(bestTown == null) return null;
+			if(bestTown == toTown) return bestDist;
+			done.rawset(bestTown, true);
+			if(!graph.rawin(bestTown)) continue;
+			foreach(nextTown, edgeDist in graph[bestTown]) {
+				if(done.rawin(nextTown)) continue;
+				local nextDist = bestDist + edgeDist;
+				if(!dist.rawin(nextTown) || nextDist < dist[nextTown]) {
+					dist.rawset(nextTown, nextDist);
+				}
+			}
+		}
+	}
+
+	function PaxMailNetwork::HasDirectTownRoute(townA, townB, paxCargo) {
+		foreach(route in Route.GetAllRoutes()) {
+			if(!route.HasCargo(paxCargo)) continue;
+			if(route.srcHgStation == null || route.destHgStation == null) continue;
+			local srcTowns = PaxMailNetwork.GetRouteTowns(route, true);
+			local destTowns = PaxMailNetwork.GetRouteTowns(route, false);
+			if(srcTowns.rawin(townA) && destTowns.rawin(townB)) return true;
+			if((route.IsBiDirectional() || HogeAI.Get().IsNetworkMode())
+					&& srcTowns.rawin(townB) && destTowns.rawin(townA)) return true;
+		}
+		return false;
+	}
+
 	function PaxMailNetwork::GetNearestConnectedDistance(town, connected) {
 		local townLoc = AITown.GetLocation(town);
 		local bestDist = 99999999;
@@ -159,11 +261,13 @@ class PaxMailNetwork {
 		});
 	}
 
-	function PaxMailNetwork::MakeCandidate(connTown, unservedTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label) {
+	function PaxMailNetwork::MakeCandidate(connTown, unservedTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label, srcOverride = null, destOverride = null) {
 		local traceId = PaxMailNetwork.NextTraceId();
 		return {
-			src        = TownCargo(connTown, paxCargo, true),
-			dest       = TownCargo(unservedTown, paxCargo, true),
+			src        = srcOverride != null ? srcOverride : TownCargo(connTown, paxCargo, true),
+			dest       = destOverride != null ? destOverride : TownCargo(unservedTown, paxCargo, true),
+			connTown   = connTown,
+			destTown   = unservedTown,
 			vehicleType = vehicleType,
 			estimate   = clone estimate,
 			cargo      = paxCargo,
@@ -195,6 +299,28 @@ class PaxMailNetwork {
 					+" production:"+production
 					+" src:"+AITown.GetName(connTown)
 					+" dest:"+AITown.GetName(unservedTown));
+		}
+		return candidate;
+	}
+
+	function PaxMailNetwork::MakeShortcutCandidate(connTown, destTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label, logCandidate = true) {
+		if(estimate == null) return null;
+		local candidate = PaxMailNetwork.MakeCandidate(connTown, destTown, paxCargo,
+			vehicleType, routeClass, estimate, dist, production, label);
+		candidate.score <- estimate.value - dist;
+		candidate.isShortcut <- true;
+		candidate.allowNetworkDestReuse <- true;
+		candidate.transfer <- false;
+		candidate.canChangeDest <- false;
+		candidate.explain = "Shortcut("+label+") "+AITown.GetName(connTown)+"<->"+AITown.GetName(destTown)+" dist:"+dist;
+		if(logCandidate) {
+			HgLog.Info("PaxMailNetwork.ShortcutTownCargo id:"+candidate.routeTraceId
+					+" mode:"+label
+					+" estimate:"+estimate.value
+					+" score:"+candidate.score
+					+" dist:"+dist
+					+" src:"+AITown.GetName(connTown)
+					+" dest:"+AITown.GetName(destTown));
 		}
 		return candidate;
 	}
@@ -306,6 +432,67 @@ class PaxMailNetwork {
 		return bestCandidate;
 	}
 
+	function PaxMailNetwork::FindShortcutCandidateForPair(connTown, destTown, paxCargo, probeRoad = true, logCandidate = true) {
+		local src = TownCargo(connTown, paxCargo, true);
+		local dest = TownCargo(destTown, paxCargo, true);
+		local dist = AIMap.DistanceManhattan(src.GetLocation(), dest.GetLocation());
+		if(dist == 0) return null;
+		local population = AITown.GetPopulation(connTown) + AITown.GetPopulation(destTown);
+		local production = max(30, population / 20);
+		local bestCandidate = null;
+
+		// Shortcuts use the normal TownCargo station path. That still prefers
+		// sharing an existing station ID and creates a feeder townbus when a
+		// separate station ID is needed because of station spread limits. Mode
+		// choice follows normal expansion: evaluate viable modes and keep the
+		// highest score.
+		if(dist <= 100
+				&& PaxMailNetwork.CanTryCandidate(src, dest, connTown, destTown, paxCargo, AIVehicle.VT_ROAD, "road")
+				&& !RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
+				&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
+			local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
+			local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
+			if(probeRoad) {
+				local pathDist = PaxMailNetwork.ProbeRoadPathDistance(src, dest, paxCargo, est, dist);
+				if(pathDist != null) {
+					est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, pathDist, min(production, 340), true, infraTypes);
+					bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, destTown, paxCargo,
+						AIVehicle.VT_ROAD, RoadRoute, est, pathDist, min(production, 340), "road", logCandidate);
+				}
+			} else {
+				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, destTown, paxCargo,
+					AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road", false);
+			}
+		}
+
+		if(dist >= 50
+				&& PaxMailNetwork.CanTryCandidate(src, dest, connTown, destTown, paxCargo, AIVehicle.VT_RAIL, "rail")
+				&& !TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
+				&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
+			local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
+			local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
+			bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, destTown, paxCargo,
+				AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail", logCandidate);
+		}
+
+		if(bestCandidate == null) return null;
+		bestCandidate.isShortcut <- true;
+		bestCandidate.allowNetworkDestReuse <- true;
+		bestCandidate.transfer <- false;
+		bestCandidate.canChangeDest <- false;
+		bestCandidate.explain = "Shortcut("+bestCandidate.modeLabel+") "
+				+AITown.GetName(connTown)+"<->"+AITown.GetName(destTown)+" dist:"+bestCandidate.distance;
+		if(logCandidate) {
+			HgLog.Info("PaxMailNetwork.ShortcutScoredSelection id:"+bestCandidate.routeTraceId
+					+" mode:"+bestCandidate.modeLabel
+					+" score:"+bestCandidate.score
+					+" dist:"+bestCandidate.distance
+					+" src:"+AITown.GetName(connTown)
+					+" dest:"+AITown.GetName(destTown));
+		}
+		return bestCandidate;
+	}
+
 	function PaxMailNetwork::GetFrontierSourceTowns(connected) {
 		local sourceLimit = 20;
 		local sourceTowns = [];
@@ -321,10 +508,11 @@ class PaxMailNetwork {
 		return sourceTowns;
 	}
 
-	function PaxMailNetwork::FindNearestUnservedTowns(connTown, unserved) {
+	function PaxMailNetwork::FindNearestTowns(connTown, towns) {
 		local byDist = [];
 		local connLoc = AITown.GetLocation(connTown);
-		foreach(unservedTown in unserved) {
+		foreach(unservedTown in towns) {
+			if(unservedTown == connTown) continue;
 			byDist.push({
 				town = unservedTown,
 				dist = AIMap.DistanceManhattan(connLoc, AITown.GetLocation(unservedTown))
@@ -337,41 +525,115 @@ class PaxMailNetwork {
 		return byDist;
 	}
 
-	function PaxMailNetwork::GetFrontierCandidateUpperBounds(connected, unserved, paxCargo) {
+	function PaxMailNetwork::GetFrontierPairLists(connected, allTowns, paxCargo) {
 		local perSourceLimit = 10;
 		local sourceTowns = PaxMailNetwork.GetFrontierSourceTowns(connected);
+		local connectedTowns = [];
+		local unservedTowns = [];
+		foreach(town in allTowns) {
+			if(connected.rawin(town)) {
+				connectedTowns.push(town);
+			} else {
+				unservedTowns.push(town);
+			}
+		}
 		local seenPairs = {};
-		local candidates = [];
+		local shortcutCandidates = [];
+		local expansionCandidates = [];
+		local graph = PaxMailNetwork.GetNetworkGraph(paxCargo, connected);
 
 		foreach(connTown in sourceTowns) {
-			local nearest = PaxMailNetwork.FindNearestUnservedTowns(connTown, unserved);
-			local limit = min(nearest.len(), perSourceLimit);
-			for(local i = 0; i < limit; i++) {
-				local unservedTown = nearest[i].town;
-				local key = PaxMailNetwork.GetPairKey(connTown, unservedTown, paxCargo, "town");
+			local shortcutNearest = PaxMailNetwork.FindNearestTowns(connTown, connectedTowns);
+			local shortcutLimit = min(shortcutNearest.len(), perSourceLimit);
+			for(local i = 0; i < shortcutLimit; i++) {
+				local destTown = shortcutNearest[i].town;
+				local key = PaxMailNetwork.GetPairKey(connTown, destTown, paxCargo, "town");
 				if(seenPairs.rawin(key)) continue;
 				seenPairs.rawset(key, true);
 
-				local candidate = PaxMailNetwork.FindBestCandidateForPair(connTown, unservedTown, paxCargo, false, false);
+				local straight = AIMap.DistanceManhattan(AITown.GetLocation(connTown), AITown.GetLocation(destTown));
+				if(straight == 0) continue;
+				if(PaxMailNetwork.HasDirectTownRoute(connTown, destTown, paxCargo)) continue;
+				local networkDistance = PaxMailNetwork.GetShortestNetworkDistance(graph, connTown, destTown);
+				if(networkDistance == null) continue;
+				if(networkDistance * 2 <= straight * 3) continue;
+				local candidate = PaxMailNetwork.FindShortcutCandidateForPair(connTown, destTown, paxCargo, false, false);
+				if(candidate != null && candidate.score > 0) {
+					local savingsBonus = networkDistance - straight;
+					candidate.score += savingsBonus;
+					candidate.isShortcut <- true;
+					candidate.networkDistance <- networkDistance;
+					candidate.straightDistance <- straight;
+					candidate.savingsBonus <- savingsBonus;
+					shortcutCandidates.push(candidate);
+					HgLog.Info("PaxMailNetwork.ShortcutCandidate score:"+candidate.score
+							+" bonus:"+savingsBonus
+							+" networkDist:"+networkDistance
+							+" straight:"+straight
+							+" src:"+AITown.GetName(connTown)
+							+" dest:"+AITown.GetName(destTown));
+				}
+			}
+
+			local expansionNearest = PaxMailNetwork.FindNearestTowns(connTown, unservedTowns);
+			local expansionLimit = min(expansionNearest.len(), perSourceLimit);
+			for(local i = 0; i < expansionLimit; i++) {
+				local destTown = expansionNearest[i].town;
+				local key = PaxMailNetwork.GetPairKey(connTown, destTown, paxCargo, "town");
+				if(seenPairs.rawin(key)) continue;
+				seenPairs.rawset(key, true);
+
+				local candidate = PaxMailNetwork.FindBestCandidateForPair(connTown, destTown, paxCargo, false, false);
 				if(candidate != null) {
-					candidates.push(candidate);
+					expansionCandidates.push(candidate);
 				}
 			}
 		}
 
-		candidates.sort(function(a, b) {
+		shortcutCandidates.sort(function(a, b) {
 			return b.score - a.score;
 		});
-		return candidates;
+		expansionCandidates.sort(function(a, b) {
+			return b.score - a.score;
+		});
+		HgLog.Info("PaxMailNetwork.PairQueue shortcuts:"+shortcutCandidates.len()
+				+" expansions:"+expansionCandidates.len()
+				+" shortcutSources:"+sourceTowns.len()
+				+" expansionSources:"+sourceTowns.len()
+				+" shortcutMode:towncargo"
+				+" shortcutSelection:scored");
+		return {
+			shortcuts = shortcutCandidates,
+			expansions = expansionCandidates
+		};
 	}
 
-	function PaxMailNetwork::FindBestFrontierCandidate(connected, unserved, paxCargo) {
-		local upperCandidates = PaxMailNetwork.GetFrontierCandidateUpperBounds(connected, unserved, paxCargo);
+	function PaxMailNetwork::FindBestCandidateFromUpperBounds(upperCandidates, paxCargo, queueLabel) {
 		local best = null;
 
 		for(local i = 0; i < upperCandidates.len(); i++) {
 			local upper = upperCandidates[i];
-			local candidate = PaxMailNetwork.FindBestCandidateForPair(upper.src.town, upper.dest.town, paxCargo, true, true);
+			local connTown = upper.rawin("connTown") ? upper.connTown : upper.src.town;
+			local destTown = upper.rawin("destTown") ? upper.destTown : upper.dest.town;
+			local candidate = null;
+			if(upper.rawin("isShortcut") && upper.isShortcut) {
+				candidate = PaxMailNetwork.FindShortcutCandidateForPair(connTown, destTown, paxCargo, true, true);
+			} else {
+				candidate = PaxMailNetwork.FindBestCandidateForPair(connTown, destTown, paxCargo, true, true);
+			}
+			if(candidate != null && upper.rawin("savingsBonus")) {
+				candidate.score += upper.savingsBonus;
+				candidate.isShortcut <- true;
+				candidate.networkDistance <- upper.networkDistance;
+				candidate.straightDistance <- upper.straightDistance;
+				candidate.savingsBonus <- upper.savingsBonus;
+				HgLog.Info("PaxMailNetwork.ShortcutScore id:"+candidate.routeTraceId
+						+" base:"+(candidate.score - upper.savingsBonus)
+						+" bonus:"+upper.savingsBonus
+						+" score:"+candidate.score
+						+" networkDist:"+upper.networkDistance
+						+" straight:"+upper.straightDistance);
+			}
 			if(candidate != null && (best == null || candidate.score > best.score)) {
 				best = candidate;
 			}
@@ -382,13 +644,24 @@ class PaxMailNetwork {
 					HgLog.Info("PaxMailNetwork.EarlyStop best:"+best.score
 							+" nextUpper:"+(nextUpperScore == null ? "none" : nextUpperScore)
 							+" checked:"+(i + 1)
-							+" total:"+upperCandidates.len());
+							+" total:"+upperCandidates.len()
+							+" queue:"+queueLabel);
 					break;
 				}
 			}
 		}
 
 		return best;
+	}
+
+	function PaxMailNetwork::FindBestFrontierCandidate(connected, allTowns, paxCargo) {
+		local pairLists = PaxMailNetwork.GetFrontierPairLists(connected, allTowns, paxCargo);
+		local shortcut = PaxMailNetwork.FindBestCandidateFromUpperBounds(pairLists.shortcuts, paxCargo, "shortcut");
+		if(shortcut != null) {
+			shortcut.isShortcut <- true;
+			return shortcut;
+		}
+		return PaxMailNetwork.FindBestCandidateFromUpperBounds(pairLists.expansions, paxCargo, "expansion");
 	}
 
 	function PaxMailNetwork::Step() {
@@ -425,7 +698,6 @@ class PaxMailNetwork {
 		foreach(town in allTowns) {
 			if(!served.rawin(town)) unserved.push(town);
 		}
-		if(unserved.len() == 0) return;
 
 		HgLog.Info("ConnectUnservedTowns: "+unserved.len()+" unserved / "+allTowns.len()+" {");
 
@@ -448,7 +720,7 @@ class PaxMailNetwork {
 			return;
 		}
 
-		local candidate = PaxMailNetwork.FindBestFrontierCandidate(connected, unserved, paxCargo);
+		local candidate = PaxMailNetwork.FindBestFrontierCandidate(connected, allTowns, paxCargo);
 
 		if(candidate != null) {
 			// Use the real profitable estimate; no value override needed
@@ -459,6 +731,7 @@ class PaxMailNetwork {
 					+" score:"+candidate.score
 					+" dist:"+candidate.distance
 					+" production:"+candidate.production
+					+" shortcut:"+(candidate.rawin("isShortcut") && candidate.isShortcut)
 					+" "+candidate.explain);
 			ai.DoInterval();
 			local builder = ai.CreateBuilder(candidate, pendingPlans, dirtyPlaces, ai.limitDate);

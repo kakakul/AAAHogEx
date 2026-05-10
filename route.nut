@@ -2213,8 +2213,12 @@ class CommonRoute extends Route {
 		local isBiDirectional = IsBiDirectional();
 		local isRoadRoute = GetVehicleType() == AIVehicle.VT_ROAD;
 		local isNetworkMode = HogeAI.Get().IsNetworkMode();
-		local effectiveSrcFullLoad = isSrcFullLoadOrder;
-		local effectiveDestFullLoad = isDestFullLoadOrder;
+		local isTownBusRoute = isRoadRoute && CargoUtils.IsPaxOrMail(cargo) && (IsTownTransferRoute() || isSrcTransfer);
+		local effectiveSrcFullLoad = isTownBusRoute ? false : isSrcFullLoadOrder;
+		local effectiveDestFullLoad = isTownBusRoute ? false : isDestFullLoadOrder;
+		if(isTownBusRoute) {
+			HgLog.Info("TownBus.NoFullLoadOrder "+this);
+		}
 		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (effectiveSrcFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		local srcOrderPosition = AIOrder.GetOrderCount(vehicle);
 		if(isBiDirectional) {
