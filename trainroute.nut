@@ -1479,10 +1479,13 @@ class TrainRoute extends Route {
 	
 	function BuildOrder(engineVehicle) {
 		local execMode = AIExecMode();
-		AIOrder.AppendOrder(engineVehicle, srcHgStation.platformTile, AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE);
+		local isNetworkMode = HogeAI.Get().IsNetworkMode();
+		local loadOrderFlags = isNetworkMode && CargoUtils.IsPaxOrMail(cargo)
+			? AIOrder.OF_NON_STOP_INTERMEDIATE
+			: AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE;
+		AIOrder.AppendOrder(engineVehicle, srcHgStation.platformTile, loadOrderFlags);
 		AIOrder.SetStopLocation	(engineVehicle, AIOrder.GetOrderCount(engineVehicle)-1, AIOrder.STOPLOCATION_MIDDLE);
 		AIOrder.AppendOrder(engineVehicle, srcDepot, AIOrder.OF_SERVICE_IF_NEEDED);
-		local isNetworkMode = HogeAI.Get().IsNetworkMode();
 		if(IsTransfer() && !(isNetworkMode && CargoUtils.IsPaxOrMail(cargo))) {
 			// Transfer-only order: only for non-pax/mail cargo (in network mode, pax/mail falls through to bidirectional)
 			AIOrder.AppendOrder(engineVehicle, destHgStation.platformTile, AIOrder.OF_NON_STOP_INTERMEDIATE + AIOrder.OF_TRANSFER + AIOrder.OF_NO_LOAD );
@@ -3370,6 +3373,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		route.isTransfer = isTransfer;
 		route.isSrcTransfer = IsSrcTransfer();
 		route.isBiDirectional = isBiDirectional;
+		route.routeTraceId = options.rawin("routeTraceId") ? options.routeTraceId : null;
 		route.AddDepotInfos(railBuilder.depotInfos);
 		route.Initialize();
 		if(!canChangeDest) {
@@ -3385,6 +3389,9 @@ class TrainRouteBuilder extends RouteBuilder {
 		}
 		
 		HgLog.Info("TrainRoute pathDistance:"+route.pathDistance+" distance:"+route.GetDistance()+" "+route);
+		if(route.routeTraceId != null) {
+			HgLog.Info("TrainRoute.Build succeeded trace:"+route.routeTraceId+" routeId:"+route.id+" "+route);
+		}
 
 		TrainRoute.instances.push(route);
 		PlaceDictionary.Get().AddRoute(route);

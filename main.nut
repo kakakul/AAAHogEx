@@ -1206,6 +1206,7 @@ class HogeAI extends AIController {
 			limitDate = limitDate
 			notUseSingle = t.rawin("notUseSingle") ? t.notUseSingle : false
 			requireFirstVehicle = t.rawin("requireFirstVehicle") ? t.requireFirstVehicle : false
+			routeTraceId = t.rawin("routeTraceId") ? t.routeTraceId : null
 		});
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);

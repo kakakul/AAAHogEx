@@ -2,7 +2,100 @@
 // HogNet passenger/mail network expansion. Network mode only.
 
 class PaxMailNetwork {
+	static state = {
+		nextTraceId = 1,
+		pairBlacklist = {},
+		lastPerformanceYear = null
+	};
 }
+
+	function PaxMailNetwork::NextTraceId() {
+		local id = PaxMailNetwork.state.nextTraceId;
+		PaxMailNetwork.state.nextTraceId = id + 1;
+		return id;
+	}
+
+	function PaxMailNetwork::GetPairKey(connTown, unservedTown, paxCargo, vehicleType) {
+		local a = min(connTown, unservedTown);
+		local b = max(connTown, unservedTown);
+		return a + "-" + b + "-" + paxCargo + "-" + vehicleType;
+	}
+
+	function PaxMailNetwork::IsPairBlacklisted(connTown, unservedTown, paxCargo, vehicleType) {
+		local key = PaxMailNetwork.GetPairKey(connTown, unservedTown, paxCargo, vehicleType);
+		if(!PaxMailNetwork.state.pairBlacklist.rawin(key)) return false;
+		local limitDate = PaxMailNetwork.state.pairBlacklist[key];
+		if(limitDate > AIDate.GetCurrentDate()) return true;
+		PaxMailNetwork.state.pairBlacklist.rawdelete(key);
+		return false;
+	}
+
+	function PaxMailNetwork::AddPairBlacklist(candidate, reason) {
+		local key = PaxMailNetwork.GetPairKey(candidate.src.town, candidate.dest.town, candidate.cargo, candidate.vehicleType);
+		local limitDate = AIDate.GetCurrentDate() + 365 * 2;
+		PaxMailNetwork.state.pairBlacklist.rawset(key, limitDate);
+		HgLog.Info("PaxMailNetwork.BlacklistAdd id:"+candidate.routeTraceId
+				+" reason:"+reason
+				+" mode:"+candidate.modeLabel
+				+" limit:"+DateUtils.ToString(limitDate)
+				+" "+candidate.explain);
+	}
+
+	function PaxMailNetwork::CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, vehicleType, label) {
+		if(PaxMailNetwork.IsPairBlacklisted(connTown, unservedTown, paxCargo, vehicleType)) {
+			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:cooldown mode:"+label
+					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
+			return false;
+		}
+		if(Place.IsNgPlace(src, paxCargo, vehicleType) || Place.IsNgPlace(dest, paxCargo, vehicleType)) {
+			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:NgPlace mode:"+label
+					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
+			return false;
+		}
+		if(Place.IsNgPathFindPair(src, dest, vehicleType)) {
+			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:NgPathFindPair mode:"+label
+					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
+			return false;
+		}
+		return true;
+	}
+
+	function PaxMailNetwork::LogAnnualPerformance(paxCargo) {
+		local year = AIDate.GetYear(AIDate.GetCurrentDate());
+		if(PaxMailNetwork.state.lastPerformanceYear == year) return;
+		PaxMailNetwork.state.lastPerformanceYear = year;
+
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.routeTraceId == null) continue;
+			if(!route.HasCargo(paxCargo)) continue;
+			if(route.vehicleGroup == null) continue;
+
+			local latestEngineSet = route.GetLatestEngineSet();
+			local vehicleCount = 0;
+			local depreciation = 0;
+			local runningCost = 0;
+			local vehicleList = route.GetVehicleList();
+			vehicleCount = vehicleList.Count();
+			if(latestEngineSet != null) {
+				depreciation = latestEngineSet.GetDepreciation() * vehicleCount;
+				runningCost = vehicleCount >= 1 ? AIEngine.GetRunningCost(latestEngineSet.engine) * vehicleCount : 0;
+			}
+			local profit = AIGroup.GetProfitLastYear(route.vehicleGroup);
+			local infraCost = route.GetRouteInfrastractureCost();
+			local net = profit - infraCost - depreciation;
+			HgLog.Info("PaxMailNetwork.Performance trace:"+route.routeTraceId
+					+" year:"+year
+					+" mode:"+Route.Class(route.GetVehicleType()).GetLabel()
+					+" routeId:"+route.id
+					+" profit:"+profit
+					+" runningCost:"+runningCost
+					+" infraCost:"+infraCost
+					+" depreciation:"+depreciation
+					+" net:"+net
+					+" vehicles:"+vehicleCount
+					+" "+route);
+		}
+	}
 
 	// Returns all station group IDs that are endpoints of any existing pax/mail route.
 	// Used to enforce station-level global connectivity: a new pax/mail route must have
@@ -67,6 +160,7 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::MakeCandidate(connTown, unservedTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label) {
+		local traceId = PaxMailNetwork.NextTraceId();
 		return {
 			src        = TownCargo(connTown, paxCargo, true),
 			dest       = TownCargo(unservedTown, paxCargo, true),
@@ -79,6 +173,8 @@ class PaxMailNetwork {
 			routeClass = routeClass,
 			allowNetworkSourceReuse = true,
 			requireFirstVehicle = true,
+			routeTraceId = traceId,
+			modeLabel = label,
 			explain    = "GlobalConnect("+label+") "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown)+" dist:"+dist
 		};
 	}
@@ -90,79 +186,129 @@ class PaxMailNetwork {
 		local candidate = PaxMailNetwork.MakeCandidate(connTown, unservedTown, paxCargo,
 			vehicleType, routeClass, estimate, dist, production, label);
 		candidate.score <- score;
+		HgLog.Info("PaxMailNetwork.Candidate id:"+candidate.routeTraceId
+				+" mode:"+label
+				+" estimate:"+estimate.value
+				+" score:"+score
+				+" dist:"+dist
+				+" production:"+production
+				+" src:"+AITown.GetName(connTown)
+				+" dest:"+AITown.GetName(unservedTown));
 		return candidate;
 	}
 
-	// For a given unserved town, find the nearest connected town that has any profitable
-	// road, water, rail, or air candidate by route_score = estimate.value - distance.
-	function PaxMailNetwork::FindBestProfitableRouteForTown(unservedTown, connected, paxCargo) {
+	function PaxMailNetwork::FindBestCandidateForPair(connTown, unservedTown, paxCargo) {
 		local townLoc = AITown.GetLocation(unservedTown);
 		local townPop = AITown.GetPopulation(unservedTown);
+		local dist = AIMap.DistanceManhattan(townLoc, AITown.GetLocation(connTown));
+		if(dist == 0) return null;
 
-		// Sort connected towns by distance so we evaluate the nearest ones first
-		local byDist = [];
+		local connPop = AITown.GetPopulation(connTown);
+		local production = max(30, (townPop + connPop) / 20);
+		local src = TownCargo(connTown, paxCargo, true);
+		local dest = TownCargo(unservedTown, paxCargo, true);
+		local bestCandidate = null;
+
+		// Road: shortest practical town-to-town connector when land-connected.
+		if(dist <= 100
+				&& PaxMailNetwork.CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, AIVehicle.VT_ROAD, "road")
+				&& !RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
+				&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
+			local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
+			local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
+			bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+				AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road");
+		}
+
+		// Water: useful when the nearest pair can be joined by sea/canal.
+		if(PaxMailNetwork.CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, AIVehicle.VT_WATER, "ship")
+				&& !WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)
+				&& WaterRoute.CanBuild(src, dest, paxCargo, true)) {
+			local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
+			local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
+			bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+				AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship");
+		}
+
+		// Rail: good for medium distances
+		if(dist >= 50
+				&& PaxMailNetwork.CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, AIVehicle.VT_RAIL, "rail")
+				&& !TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
+				&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
+			local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
+			local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
+			bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+				AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail");
+		}
+
+		// Air: good for long distances when profitable
+		if(dist >= 150
+				&& PaxMailNetwork.CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, AIVehicle.VT_AIR, "air")
+				&& !AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
+			local infraTypes = AirRoute.GetSuitableInfrastractureTypes(
+				src, dest, paxCargo);
+			local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
+			bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
+				AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air");
+		}
+
+		return bestCandidate;
+	}
+
+	function PaxMailNetwork::GetFrontierSourceTowns(connected) {
+		local sourceLimit = 20;
+		local sourceTowns = [];
 		foreach(connTown, _ in connected) {
+			sourceTowns.push(connTown);
+		}
+		sourceTowns.sort(function(a, b) {
+			return AITown.GetPopulation(b) - AITown.GetPopulation(a);
+		});
+		while(sourceTowns.len() > sourceLimit) {
+			sourceTowns.pop();
+		}
+		return sourceTowns;
+	}
+
+	function PaxMailNetwork::FindNearestUnservedTowns(connTown, unserved) {
+		local byDist = [];
+		local connLoc = AITown.GetLocation(connTown);
+		foreach(unservedTown in unserved) {
 			byDist.push({
-				town = connTown,
-				dist = AIMap.DistanceManhattan(townLoc, AITown.GetLocation(connTown))
+				town = unservedTown,
+				dist = AIMap.DistanceManhattan(connLoc, AITown.GetLocation(unservedTown))
 			});
 		}
-		byDist.sort(function(a, b) { return a.dist - b.dist; });
+		byDist.sort(function(a, b) {
+			if(a.dist != b.dist) return a.dist - b.dist;
+			return AITown.GetPopulation(b.town) - AITown.GetPopulation(a.town);
+		});
+		return byDist;
+	}
 
-		// Only evaluate up to 15 nearest connected towns to keep this step fast
-		local limit = min(byDist.len(), 15);
+	function PaxMailNetwork::FindBestFrontierCandidate(connected, unserved, paxCargo) {
+		local perSourceLimit = 10;
+		local sourceTowns = PaxMailNetwork.GetFrontierSourceTowns(connected);
+		local seenPairs = {};
+		local best = null;
 
-		for(local i = 0; i < limit; i++) {
-			local connTown = byDist[i].town;
-			local dist = byDist[i].dist;
-			if(dist == 0) continue;
-			local connPop = AITown.GetPopulation(connTown);
-			local production = max(30, (townPop + connPop) / 20);
-			local src = TownCargo(connTown, paxCargo, true);
-			local dest = TownCargo(unservedTown, paxCargo, true);
-			local bestCandidate = null;
+		foreach(connTown in sourceTowns) {
+			local nearest = PaxMailNetwork.FindNearestUnservedTowns(connTown, unserved);
+			local limit = min(nearest.len(), perSourceLimit);
+			for(local i = 0; i < limit; i++) {
+				local unservedTown = nearest[i].town;
+				local key = PaxMailNetwork.GetPairKey(connTown, unservedTown, paxCargo, "town");
+				if(seenPairs.rawin(key)) continue;
+				seenPairs.rawset(key, true);
 
-			// Road: shortest practical town-to-town connector when land-connected.
-			if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
-					&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
-				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
-				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
-				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
-					AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road");
+				local candidate = PaxMailNetwork.FindBestCandidateForPair(connTown, unservedTown, paxCargo);
+				if(candidate != null && (best == null || candidate.score > best.score)) {
+					best = candidate;
+				}
 			}
-
-			// Water: useful when the nearest pair can be joined by sea/canal.
-			if(!WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)
-					&& WaterRoute.CanBuild(src, dest, paxCargo, true)) {
-				local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
-				local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
-				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
-					AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship");
-			}
-
-			// Rail: good for medium distances
-			if(dist >= 50
-					&& !TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
-					&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
-				local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
-				local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
-				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
-					AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail");
-			}
-
-			// Air: good for long distances when profitable
-			if(!AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
-				local infraTypes = AirRoute.GetSuitableInfrastractureTypes(
-					src, dest, paxCargo);
-				local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
-				bestCandidate = PaxMailNetwork.MaybeUseCandidate(bestCandidate, connTown, unservedTown, paxCargo,
-					AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air");
-			}
-
-			if(bestCandidate != null) return bestCandidate;
 		}
 
-		return null; // null if nothing is profitable
+		return best;
 	}
 
 	function PaxMailNetwork::Step() {
@@ -173,6 +319,7 @@ class PaxMailNetwork {
 
 		local paxCargo = ai.GetPassengerCargo();
 		if(paxCargo == false || paxCargo == null) return;
+		PaxMailNetwork.LogAnnualPerformance(paxCargo);
 
 		// No point running if all vehicle types are saturated
 		if(TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
@@ -213,65 +360,53 @@ class PaxMailNetwork {
 			unserved = filtered;
 		}
 
-		local maxNew = 3;
-		local built = 0;
 		local dirtyPlaces = {};
 		local pendingPlans = [];
-		local remaining = unserved;
 
-		while(remaining.len() > 0 && built < maxNew) {
-			PaxMailNetwork.SortTownsByNetworkDistance(remaining, connected);
-			local unservedTown = remaining[0];
-			remaining.remove(0);
-			if(ai.limitDate < AIDate.GetCurrentDate()) {
-				HgLog.Warning("ConnectUnservedTowns: reached limitDate");
-				break;
-			}
-
-			local destKey = TownCargo(unservedTown, paxCargo, true).GetFacilityId() + ":" + paxCargo;
-			if(dirtyPlaces.rawin(destKey)) {
-				continue;
-			}
-
-			// --- Try nearest profitable road, water, rail, or air route ---
-			local candidate = PaxMailNetwork.FindBestProfitableRouteForTown(unservedTown, connected, paxCargo);
-
-			if(candidate != null) {
-				// Use the real profitable estimate; no value override needed
-				candidate.score <- candidate.estimate.value;
-				candidate.maxValue <- candidate.estimate.value;
-				ai.DoInterval();
-				local builder = ai.CreateBuilder(candidate, pendingPlans, dirtyPlaces, ai.limitDate);
-				if(builder != null) {
-					HgLog.Info("ConnectUnservedTowns: "+candidate.explain+" {");
-					local newRoutes = builder.Build();
-					HgLog.Info("} ConnectUnservedTowns build");
-					if(newRoutes != null) {
-						if(typeof newRoutes != "array") newRoutes = [newRoutes];
-						foreach(newRoute in newRoutes) {
-							if(newRoute.srcHgStation.place != null) {
-								newRoute.srcHgStation.place.SetDirtyArround();
-							}
-						}
-						built++;
-						connected = PaxMailNetwork.GetPassengerServedTowns(paxCargo);
-						if(candidate.src instanceof TownCargo) connected.rawset(candidate.src.town, true);
-						if(candidate.dest instanceof TownCargo) connected.rawset(candidate.dest.town, true);
-						local filteredRemaining = [];
-						foreach(town in remaining) {
-							if(!connected.rawin(town)) filteredRemaining.push(town);
-						}
-						remaining = filteredRemaining;
-					}
-				}
-				ai.routeCandidates.Extend(pendingPlans);
-				pendingPlans.clear();
-
-			} else {
-				HgLog.Info("ConnectUnservedTowns: no viable route for "+AITown.GetName(unservedTown)+", skipping");
-			}
-
+		if(ai.limitDate < AIDate.GetCurrentDate()) {
+			HgLog.Warning("ConnectUnservedTowns: reached limitDate");
+			return;
 		}
 
-		HgLog.Info("} ConnectUnservedTowns built:"+built);
+		local candidate = PaxMailNetwork.FindBestFrontierCandidate(connected, unserved, paxCargo);
+
+		if(candidate != null) {
+			// Use the real profitable estimate; no value override needed
+			candidate.maxValue <- candidate.estimate.value;
+			HgLog.Info("PaxMailNetwork.Selected id:"+candidate.routeTraceId
+					+" mode:"+candidate.modeLabel
+					+" estimate:"+candidate.estimate.value
+					+" score:"+candidate.score
+					+" dist:"+candidate.distance
+					+" production:"+candidate.production
+					+" "+candidate.explain);
+			ai.DoInterval();
+			local builder = ai.CreateBuilder(candidate, pendingPlans, dirtyPlaces, ai.limitDate);
+			if(builder != null) {
+				HgLog.Info("ConnectUnservedTowns: "+candidate.explain+" {");
+				local newRoutes = builder.Build();
+				HgLog.Info("} ConnectUnservedTowns build");
+				if(newRoutes != null) {
+					if(typeof newRoutes != "array") newRoutes = [newRoutes];
+					foreach(newRoute in newRoutes) {
+						if(newRoute.srcHgStation.place != null) {
+							newRoute.srcHgStation.place.SetDirtyArround();
+						}
+					}
+				} else {
+					PaxMailNetwork.AddPairBlacklist(candidate, "BuildFailed");
+					HgLog.Info("PaxMailNetwork.BuildFailed id:"+candidate.routeTraceId+" "+candidate.explain);
+				}
+			} else {
+				PaxMailNetwork.AddPairBlacklist(candidate, "BuildSkipped");
+				HgLog.Info("PaxMailNetwork.BuildSkipped id:"+candidate.routeTraceId+" "+candidate.explain);
+			}
+			ai.routeCandidates.Extend(pendingPlans);
+			pendingPlans.clear();
+
+		} else {
+			HgLog.Info("ConnectUnservedTowns: no viable frontier route");
+		}
+
+		HgLog.Info("} ConnectUnservedTowns built");
 	}
