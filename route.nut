@@ -3118,7 +3118,7 @@ class CommonRoute extends Route {
 			list.Valuate(AIVehicle.GetCurrentSpeed);
 			list.KeepValue(0);
 			
-			return list.Count() >= (IsTownTransferRoute() ? 1 : 2);
+			return list.Count() >= (IsTownTransferRoute() ? 4 : 2);
 /*			
 			foreach(v,_ in list) {
 				if(AIVehicle.GetState(v) == AIVehicle.VS_AT_STATION) {
