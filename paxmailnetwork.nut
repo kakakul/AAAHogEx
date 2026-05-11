@@ -45,22 +45,83 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::CanTryCandidate(src, dest, connTown, unservedTown, paxCargo, vehicleType, label) {
-		if(PaxMailNetwork.IsPairBlacklisted(connTown, unservedTown, paxCargo, vehicleType)) {
-			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:cooldown mode:"+label
-					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
-			return false;
-		}
-		if(Place.IsNgPlace(src, paxCargo, vehicleType) || Place.IsNgPlace(dest, paxCargo, vehicleType)) {
-			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:NgPlace mode:"+label
-					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
-			return false;
-		}
-		if(Place.IsNgPathFindPair(src, dest, vehicleType)) {
-			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:NgPathFindPair mode:"+label
+		local reason = PaxMailNetwork.GetTryRejectReason(src, dest, connTown, unservedTown, paxCargo, vehicleType);
+		if(reason != null) {
+			HgLog.Info("PaxMailNetwork.BlacklistSkip reason:"+reason+" mode:"+label
 					+" "+AITown.GetName(connTown)+"<->"+AITown.GetName(unservedTown));
 			return false;
 		}
 		return true;
+	}
+
+	function PaxMailNetwork::GetTryRejectReason(src, dest, connTown, unservedTown, paxCargo, vehicleType) {
+		if(PaxMailNetwork.IsPairBlacklisted(connTown, unservedTown, paxCargo, vehicleType)) {
+			return "cooldown";
+		}
+		if(Place.IsNgPlace(src, paxCargo, vehicleType) || Place.IsNgPlace(dest, paxCargo, vehicleType)) {
+			return "NgPlace";
+		}
+		if(Place.IsNgPathFindPair(src, dest, vehicleType)) {
+			return "NgPathFindPair";
+		}
+		return null;
+	}
+
+	function PaxMailNetwork::MakeRejectStats() {
+		return {
+			total = 0,
+			direct = 0,
+			cooldown = 0,
+			NgPlace = 0,
+			NgPathFindPair = 0,
+			roadDistance = 0,
+			roadLimit = 0,
+			roadNoLand = 0,
+			roadProbe = 0,
+			shipLimit = 0,
+			shipCannotBuild = 0,
+			railDistance = 0,
+			railLimit = 0,
+			railNoLand = 0,
+			airDistance = 0,
+			airLimit = 0,
+			noEstimate = 0,
+			nonPositiveScore = 0,
+			allModesRejected = 0
+		};
+	}
+
+	function PaxMailNetwork::CountReject(stats, reason) {
+		if(stats == null) return;
+		if(!stats.rawin(reason)) {
+			stats.rawset(reason, 0);
+		}
+		stats[reason] = stats[reason] + 1;
+	}
+
+	function PaxMailNetwork::LogRejectSummary(group, stats, selected) {
+		if(stats == null) return;
+		HgLog.Info("PaxMailNetwork.GroupRejectSummary group:"+group
+				+" selected:"+(selected == null ? "none" : selected.routeTraceId)
+				+" total:"+stats.total
+				+" direct:"+stats.direct
+				+" cooldown:"+stats.cooldown
+				+" NgPlace:"+stats.NgPlace
+				+" NgPathFindPair:"+stats.NgPathFindPair
+				+" roadDistance:"+stats.roadDistance
+				+" roadLimit:"+stats.roadLimit
+				+" roadNoLand:"+stats.roadNoLand
+				+" roadProbe:"+stats.roadProbe
+				+" shipLimit:"+stats.shipLimit
+				+" shipCannotBuild:"+stats.shipCannotBuild
+				+" railDistance:"+stats.railDistance
+				+" railLimit:"+stats.railLimit
+				+" railNoLand:"+stats.railNoLand
+				+" airDistance:"+stats.airDistance
+				+" airLimit:"+stats.airLimit
+				+" noEstimate:"+stats.noEstimate
+				+" nonPositiveScore:"+stats.nonPositiveScore
+				+" allModesRejected:"+stats.allModesRejected);
 	}
 
 	function PaxMailNetwork::LogAnnualPerformance(paxCargo) {
@@ -243,10 +304,16 @@ class PaxMailNetwork {
 		};
 	}
 
-	function PaxMailNetwork::MaybeUsePlannedCandidate(best, srcTown, destTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label, role, group, logCandidate = true) {
-		if(estimate == null) return best;
+	function PaxMailNetwork::MaybeUsePlannedCandidate(best, srcTown, destTown, paxCargo, vehicleType, routeClass, estimate, dist, production, label, role, group, logCandidate = true, rejectStats = null) {
+		if(estimate == null) {
+			PaxMailNetwork.CountReject(rejectStats, "noEstimate");
+			return best;
+		}
 		local score = estimate.value;
-		if(score <= 0) return best;
+		if(score <= 0) {
+			PaxMailNetwork.CountReject(rejectStats, "nonPositiveScore");
+			return best;
+		}
 		if(best != null && best.score >= score) return best;
 		local candidate = PaxMailNetwork.MakeCandidate(srcTown, destTown, paxCargo,
 			vehicleType, routeClass, estimate, dist, production, label);
@@ -432,74 +499,139 @@ class PaxMailNetwork {
 		return edges;
 	}
 
-	function PaxMailNetwork::FindBestPlannedCandidateForPair(srcTown, destTown, paxCargo, role, group, probeRoad = true, logCandidate = true) {
-		if(PaxMailNetwork.HasDirectTownRoute(srcTown, destTown, paxCargo)) return null;
+	function PaxMailNetwork::FindBestPlannedCandidateForPair(srcTown, destTown, paxCargo, role, group, probeRoad = true, logCandidate = true, rejectStats = null) {
+		if(rejectStats != null) rejectStats.total++;
+		if(PaxMailNetwork.HasDirectTownRoute(srcTown, destTown, paxCargo)) {
+			PaxMailNetwork.CountReject(rejectStats, "direct");
+			return null;
+		}
 		local src = TownCargo(srcTown, paxCargo, true);
 		local dest = TownCargo(destTown, paxCargo, true);
 		local dist = AIMap.DistanceManhattan(src.GetLocation(), dest.GetLocation());
 		if(dist == 0) return null;
 		local production = max(30, (AITown.GetPopulation(srcTown) + AITown.GetPopulation(destTown)) / 20);
 		local bestCandidate = null;
+		local rejectedModes = 0;
 
-		if(dist <= 100
-				&& PaxMailNetwork.CanTryCandidate(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_ROAD, "road")
-				&& !RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)
-				&& HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
-			local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
-			local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
-			if(probeRoad) {
-				local pathDist = PaxMailNetwork.ProbeRoadPathDistance(src, dest, paxCargo, est, dist);
-				if(pathDist != null) {
-					est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, pathDist, min(production, 340), true, infraTypes);
-					bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
-						AIVehicle.VT_ROAD, RoadRoute, est, pathDist, min(production, 340), "road", role, group, logCandidate);
-				}
+		if(dist > 100) {
+			PaxMailNetwork.CountReject(rejectStats, "roadDistance");
+			rejectedModes++;
+		} else if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)) {
+			local roadReject = PaxMailNetwork.GetTryRejectReason(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_ROAD);
+			if(roadReject != null) {
+				PaxMailNetwork.CountReject(rejectStats, roadReject);
+				HgLog.Info("PaxMailNetwork.BlacklistSkip reason:"+roadReject+" mode:road "
+						+AITown.GetName(srcTown)+"<->"+AITown.GetName(destTown));
+				rejectedModes++;
+			} else if(!HgTile.IsLandConnectedForRoad(src.GetLocation(), dest.GetLocation())) {
+				PaxMailNetwork.CountReject(rejectStats, "roadNoLand");
+				rejectedModes++;
 			} else {
+				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
+				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
+				if(probeRoad) {
+					local pathDist = PaxMailNetwork.ProbeRoadPathDistance(src, dest, paxCargo, est, dist);
+					if(pathDist != null) {
+						est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, pathDist, min(production, 340), true, infraTypes);
+						bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
+							AIVehicle.VT_ROAD, RoadRoute, est, pathDist, min(production, 340), "road", role, group, logCandidate, rejectStats);
+					} else {
+						PaxMailNetwork.CountReject(rejectStats, "roadProbe");
+						rejectedModes++;
+					}
+				} else {
+					bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
+						AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road", role, group, false, rejectStats);
+				}
+			}
+		} else {
+			PaxMailNetwork.CountReject(rejectStats, "roadLimit");
+			rejectedModes++;
+		}
+
+		if(WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)) {
+			PaxMailNetwork.CountReject(rejectStats, "shipLimit");
+			rejectedModes++;
+		} else {
+			local shipReject = PaxMailNetwork.GetTryRejectReason(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_WATER);
+			if(shipReject != null) {
+				PaxMailNetwork.CountReject(rejectStats, shipReject);
+				HgLog.Info("PaxMailNetwork.BlacklistSkip reason:"+shipReject+" mode:ship "
+						+AITown.GetName(srcTown)+"<->"+AITown.GetName(destTown));
+				rejectedModes++;
+			} else if(WaterRoute.CanBuild(src, dest, paxCargo, true)) {
+				local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
+				local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
 				bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
-					AIVehicle.VT_ROAD, RoadRoute, est, dist, min(production, 340), "road", role, group, false);
+					AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship", role, group, logCandidate, rejectStats);
+			} else {
+				PaxMailNetwork.CountReject(rejectStats, "shipCannotBuild");
+				rejectedModes++;
 			}
 		}
 
-		if(PaxMailNetwork.CanTryCandidate(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_WATER, "ship")
-				&& !WaterRoute.IsTooManyVehiclesForNewRoute(WaterRoute)
-				&& WaterRoute.CanBuild(src, dest, paxCargo, true)) {
-			local infraTypes = WaterRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
-			local est = Route.Estimate(AIVehicle.VT_WATER, paxCargo, dist, min(production, 550), true, infraTypes);
-			bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
-				AIVehicle.VT_WATER, WaterRoute, est, dist, min(production, 550), "ship", role, group, logCandidate);
+		if(dist < 50) {
+			PaxMailNetwork.CountReject(rejectStats, "railDistance");
+			rejectedModes++;
+		} else if(TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)) {
+			PaxMailNetwork.CountReject(rejectStats, "railLimit");
+			rejectedModes++;
+		} else {
+			local railReject = PaxMailNetwork.GetTryRejectReason(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_RAIL);
+			if(railReject != null) {
+				PaxMailNetwork.CountReject(rejectStats, railReject);
+				HgLog.Info("PaxMailNetwork.BlacklistSkip reason:"+railReject+" mode:rail "
+						+AITown.GetName(srcTown)+"<->"+AITown.GetName(destTown));
+				rejectedModes++;
+			} else if(HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
+				local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
+				local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
+				bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
+					AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail", role, group, logCandidate, rejectStats);
+			} else {
+				PaxMailNetwork.CountReject(rejectStats, "railNoLand");
+				rejectedModes++;
+			}
 		}
 
-		if(dist >= 50
-				&& PaxMailNetwork.CanTryCandidate(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_RAIL, "rail")
-				&& !TrainRoute.IsTooManyVehiclesForNewRoute(TrainRoute)
-				&& HgTile.IsLandConnectedForRail(src.GetLocation(), dest.GetLocation())) {
-			local infraTypes = TrainRoute.GetDefaultInfrastractureTypes();
-			local est = Route.Estimate(AIVehicle.VT_RAIL, paxCargo, dist, min(production, 550), true, infraTypes);
-			bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
-				AIVehicle.VT_RAIL, TrainRoute, est, dist, min(production, 550), "rail", role, group, logCandidate);
+		if(dist < 150) {
+			PaxMailNetwork.CountReject(rejectStats, "airDistance");
+			rejectedModes++;
+		} else if(AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
+			PaxMailNetwork.CountReject(rejectStats, "airLimit");
+			rejectedModes++;
+		} else {
+			local airReject = PaxMailNetwork.GetTryRejectReason(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_AIR);
+			if(airReject != null) {
+				PaxMailNetwork.CountReject(rejectStats, airReject);
+				HgLog.Info("PaxMailNetwork.BlacklistSkip reason:"+airReject+" mode:air "
+						+AITown.GetName(srcTown)+"<->"+AITown.GetName(destTown));
+				rejectedModes++;
+			} else {
+				local infraTypes = AirRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
+				local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
+				bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
+					AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air", role, group, logCandidate, rejectStats);
+			}
 		}
 
-		if(dist >= 150
-				&& PaxMailNetwork.CanTryCandidate(src, dest, srcTown, destTown, paxCargo, AIVehicle.VT_AIR, "air")
-				&& !AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
-			local infraTypes = AirRoute.GetSuitableInfrastractureTypes(src, dest, paxCargo);
-			local est = Route.Estimate(AIVehicle.VT_AIR, paxCargo, dist, min(production, 550), true, infraTypes);
-			bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
-				AIVehicle.VT_AIR, AirRoute, est, dist, min(production, 550), "air", role, group, logCandidate);
+		if(bestCandidate == null && rejectedModes >= 4) {
+			PaxMailNetwork.CountReject(rejectStats, "allModesRejected");
 		}
-
 		return bestCandidate;
 	}
 
 	function PaxMailNetwork::FindBestInPlannedEdges(edges, paxCargo, role, group) {
 		local best = null;
+		local rejectStats = PaxMailNetwork.MakeRejectStats();
 		foreach(edge in edges) {
 			local candidate = PaxMailNetwork.FindBestPlannedCandidateForPair(
-				edge.srcTown, edge.destTown, paxCargo, role, group, true, true);
+				edge.srcTown, edge.destTown, paxCargo, role, group, true, true, rejectStats);
 			if(candidate != null && (best == null || candidate.score > best.score)) {
 				best = candidate;
 			}
 		}
+		PaxMailNetwork.LogRejectSummary(group, rejectStats, best);
 		return best;
 	}
 

@@ -1500,6 +1500,27 @@ class Route {
 	function OnIndustoryClose(industry,usedStations) {
 		// CheckCloseでやる
 	}
+
+	function GetRemovalDiagnostic(reason) {
+		local vehicleCount = vehicleGroup == null ? 0 : GetVehicleList().Count();
+		local profit = vehicleGroup == null ? 0 : AIGroup.GetProfitLastYear(vehicleGroup);
+		local infraCost = 0;
+		if(!IsBuilding()) {
+			infraCost = GetRouteInfrastractureCost();
+		}
+		local startText = startDate == null ? "null" : DateUtils.ToString(startDate);
+		return "RouteRemovalDiag reason:"+reason
+				+GetTraceLogPart()
+				+" vt:"+GetLabel()
+				+" vehicles:"+vehicleCount
+				+" profitLastYear:"+profit
+				+" infraCost:"+infraCost
+				+" closed:"+IsClosed()
+				+" removed:"+IsRemoved()
+				+" building:"+IsBuilding()
+				+" start:"+startText
+				+" "+this;
+	}
 	
 	function _tostring() {
 		local state = IsClosed() ? (IsRemoved()?" Removed":" Closed"): "";
@@ -1751,14 +1772,20 @@ class CommonRoute extends Route {
 				averageProfit = sum / d; // TODO: 古くなる場合のみ必要。寿命も考慮 - totalValue * 9 / 100/*減価償却*/;
 				if(averageProfit <= 0) {
 					HgLog.Warning("RemoveRoute averageProfit:"+averageProfit+" infraCost:"+infraCost+route.GetTraceLogPart()+" "+route);
+					HgLog.Warning(route.GetRemovalDiagnostic("averageProfit")
+							+" averageProfit:"+averageProfit
+							+" checkYear:"+checkYear
+							+" profitsLen:"+profitsLen
+							+" runningCost:"+runningCost
+							+" depreciation:"+depreciation);
 					if(vehicleList.Count() > 2) {
 						// Too many vehicles may be the cause; try halving first before removing outright.
 						// Clear the profits history so the route has checkYear fresh years to recover.
 						route.ReduceVehiclesToHalf();
 						route.profits = [];
 					} else {
-					route.Remove();
-					routeRemoved = true;
+						route.Remove();
+						routeRemoved = true;
 					}
 					continue;
 				}
@@ -2526,6 +2553,7 @@ class CommonRoute extends Route {
 		//HgLog.Info("maxVehicles:"+maxVehicles+" "+this);
 		if(maxVehicles == 0 && !IsTransfer()) {
 			HgLog.Warning("Route Remove (maxVehicles reach zero)"+GetTraceLogPart()+" "+this);
+			HgLog.Warning(GetRemovalDiagnostic("maxVehiclesZero"));
 			Remove();
 			return;
 		}
@@ -2816,6 +2844,7 @@ class CommonRoute extends Route {
 		
 		if(isRemoved && (vehicleList.Count() == 0 || removeStart + 365 < AIDate.GetCurrentDate())) {
 			HgLog.Warning("All vehicles removed or spending 365 days."+this);
+			HgLog.Warning(GetRemovalDiagnostic("removeFinishedCommon"));
 			RemoveFinished();
 		}
 		
@@ -3177,6 +3206,7 @@ class CommonRoute extends Route {
 			HgLog.Warning("Cannot Remove Route (IsBuilding == true) "+this);
 			return;
 		}
+		HgLog.Warning(GetRemovalDiagnostic("CommonRoute.Remove"));
 		saveData.isClosed = isClosed = true;
 		saveData.isRemoved = isRemoved = true;
 		saveData.removeStart = removeStart = AIDate.GetCurrentDate();
@@ -3868,7 +3898,6 @@ class CommonRouteBuilder extends RouteBuilder {
 			infrastractureTypes = routeClass.GetSuitableInfrastractureTypes( src, dest, cargo);
 		}
 		local engineSet = Route.Estimate(vehicleType, cargo, distance, production, isBiDirectional, infrastractureTypes);
-		HgLog.Info("CommonRouteBuilder isBiDirectional:"+isBiDirectional+" production:"+production+" distance:"+distance+" "+this);
 		if(engineSet==null) {
 			HgLog.Warning("No suitable engine. "+this);
 			return null;
@@ -4159,6 +4188,16 @@ class CommonRouteBuilder extends RouteBuilder {
 			} else {
 				HgLog.Info("CommonRouteBuilder.Build succeeded."+route);
 			}
+			local routePathDistance = path == null ? 0 : path.GetTotalDistance(vehicleType);
+			HgLog.Info("CommonRouteBuilder.BuildSummary routeId:"+route.id
+					+" vt:"+route.GetLabel()
+					+" production:"+production
+					+" distance:"+distance
+					+" pathDistance:"+routePathDistance
+					+" bidirectional:"+isBiDirectional
+					+" shareSrc:"+isShareSrcStation
+					+" shareDest:"+isShareDestStation
+					+" "+route);
 			
 			route.isBuilding = false;
 			return route;
@@ -4185,7 +4224,6 @@ class CommonRouteBuilder extends RouteBuilder {
 		if(station.place == null || !(station.place instanceof TownCargo) || route.IsTownTransferRoute() || !route.HasCargo(cargo)) {
 			return;
 		}
-		HgLog.Info("CheckTownTransferCargo:"+station.GetName()+" "+AICargo.GetName(cargo)+" "+route);
 		if(station.place instanceof TownCargo && HogeAI.Get().CanExtendCoverageAreaInTowns()) {
 			station.BuildSpreadPieceStations();
 			if(route.GetVehicleType() == AIVehicle.VT_ROAD) return;

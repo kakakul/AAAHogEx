@@ -1079,8 +1079,6 @@ class StationFactory {
 			stationScoreList.AddItem(stationIndex, station.score);
 		}
 		HogeAI.DoInterval();
-		HgLog.Info("GetBestHgStationCosts phase1 days:"+(AIDate.GetCurrentDate()-startDate)+" candidates:"+stationScoreList.Count()+"/"+hgStations.len()
-			+(considerAcceptance?" considerAcceptance":"")+" "+this);
 		startDate = AIDate.GetCurrentDate();
 		local candidates = [];
 		foreach(stationIndex,score in stationScoreList) {
@@ -1091,7 +1089,6 @@ class StationFactory {
 				continue;
 			}
 			if(CheckFinal(station) && station.Build(levelTiles, true)) {
-				HgLog.Info("Build succeeded(TestMode) "+station+" "+this);
 				station.levelTiles = levelTiles;
 				candidates.push([station,0]);
 				if(candidates.len() >= 2) break; // collect one fallback then stop; testing is expensive
@@ -1387,7 +1384,6 @@ class RailStationFactory extends StationFactory {
 		minPlatformLength = min(minPlatformLength, settingMax);
 	
 		for(; platformLength >= minPlatformLength; platformLength -= max(1, platformLength / (timeout ? 2 : 4))) {
-			HgLog.Info("TrainRoute: RailStationFactory.CreateBest start "+target.GetName()+" platformLength:"+platformLength);
 			local result = StationFactory.CreateBest(target, cargo, toTile, useStationGroup);
 			if(result != null) {
 				return result;
@@ -2246,7 +2242,6 @@ class HgStation {
 		if(lastSpreadDate!=null && AIDate.GetCurrentDate() < lastSpreadDate + (notAccepted ? 30 : 5 * 365)) return false;
 		lastSpreadDate = AIDate.GetCurrentDate();
 		local execMode = AIExecMode();
-		HgLog.Info("BuildSpreadPieceStations ["+AICargo.GetName(cargo)+"] "+this);
 
 		local airSpread = this instanceof AirStation && !TownBus.CanUse(cargo);
 	

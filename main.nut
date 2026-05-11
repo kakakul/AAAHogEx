@@ -870,7 +870,6 @@ class HogeAI extends AIController {
 
 	function _ScanPlaces() {
 		if(IsNetworkMode()) {
-			HgLog.Info("ScanPlaces: skipped in network mode");
 			return;
 		}
 		HgLog.Info("###### Scan places");
@@ -1269,6 +1268,20 @@ class HogeAI extends AIController {
 			return;
 		}
 
+		local returnStats = {
+			checked = 0,
+			tooShort = 0,
+			alreadyReturn = 0,
+			bidirectional = 0,
+			single = 0,
+			transfer = 0,
+			changeDest = 0,
+			cannotChangeDest = 0,
+			searched = 0,
+			found = 0,
+			notFound = 0,
+			built = 0
+		};
 		local aiTestMode = AITestMode();
 		local list = AIList();
 		list.Sort(AIList.SORT_BY_VALUE, false);
@@ -1306,12 +1319,26 @@ class HogeAI extends AIController {
 			
 
 			SearchAndBuildAdditionalDestAsFarAsPossible( route );
-			CheckBuildReturnRoute(route);
+			CheckBuildReturnRoute(route, null, returnStats);
 			DoInterval();
 			
 			if(limitDate < AIDate.GetCurrentDate()) {
 				break;
 			}
+		}
+		if(returnStats.checked >= 1) {
+			HgLog.Info("CheckBuildReturnRouteSummary checked:"+returnStats.checked
+					+" searched:"+returnStats.searched
+					+" found:"+returnStats.found
+					+" built:"+returnStats.built
+					+" notFound:"+returnStats.notFound
+					+" tooShort:"+returnStats.tooShort
+					+" alreadyReturn:"+returnStats.alreadyReturn
+					+" bidirectional:"+returnStats.bidirectional
+					+" single:"+returnStats.single
+					+" transfer:"+returnStats.transfer
+					+" changeDest:"+returnStats.changeDest
+					+" cannotChangeDest:"+returnStats.cannotChangeDest);
 		}
 	}
 	
@@ -3454,29 +3481,57 @@ class HogeAI extends AIController {
 		return null;
 	}
 
-	function CheckBuildReturnRoute(route, limitValue=null) {
+	function CheckBuildReturnRoute(route, limitValue=null, stats=null) {
 		/*if(ecs) { // TODO ECSでは頻繁にdestが受け入れなくなり、destが変更になる事から対応が難しい, YETIも必要な経路では無い事が多い=>受け入れ拒否に対する対応が進んでいる
 			return;
 		}*/
 	
-		HgLog.Info("CheckBuildReturnRoute:"+route+" "+route.GetDistance());
-		if(route.returnRoute == null && route.GetDistance() >= 800
-				&& !route.IsBiDirectional() && !route.IsSingle() && !route.IsTransfer() && !route.IsChangeDestination() && !route.cannotChangeDest) {
-			HgLog.Info("SearchReturnPlacePairs route:"+route);
-			local t = SearchReturnPlacePairs(route.GetPathAllDestToSrc(), route.cargo);
-			if(t.pairs.len() >= 1) {
-				local pair = t.pairs[0];
-				HgLog.Info("Found return route:"+pair[0].GetName()+" to "+pair[1].GetName()+" used route:"+route);
-				return TrainReturnRouteBuilder(route,pair[0],pair[1]).Build();
-			} else {
-				HgLog.Info("Not found ReturnPlacePairs route:"+route);
-			}
-			
-			/* else if(t.placePathDistances.len() >= 1){
-				HgLog.Info("Build empty return route:"+t.placePathDistances[0][0].GetName()+" used route:"+route);
-				BuildReturnRoute(route,null,t.placePathDistances[0][0]);
-			}*/
+		if(stats != null) stats.checked++;
+		if(route.returnRoute != null) {
+			if(stats != null) stats.alreadyReturn++;
+			return null;
 		}
+		if(route.GetDistance() < 800) {
+			if(stats != null) stats.tooShort++;
+			return null;
+		}
+		if(route.IsBiDirectional()) {
+			if(stats != null) stats.bidirectional++;
+			return null;
+		}
+		if(route.IsSingle()) {
+			if(stats != null) stats.single++;
+			return null;
+		}
+		if(route.IsTransfer()) {
+			if(stats != null) stats.transfer++;
+			return null;
+		}
+		if(route.IsChangeDestination()) {
+			if(stats != null) stats.changeDest++;
+			return null;
+		}
+		if(route.cannotChangeDest) {
+			if(stats != null) stats.cannotChangeDest++;
+			return null;
+		}
+		if(stats != null) stats.searched++;
+		local t = SearchReturnPlacePairs(route.GetPathAllDestToSrc(), route.cargo);
+		if(t.pairs.len() >= 1) {
+			local pair = t.pairs[0];
+			HgLog.Info("Found return route:"+pair[0].GetName()+" to "+pair[1].GetName()+" used route:"+route);
+			if(stats != null) stats.found++;
+			local result = TrainReturnRouteBuilder(route,pair[0],pair[1]).Build();
+			if(result != null && stats != null) stats.built++;
+			return result;
+		} else {
+			if(stats != null) stats.notFound++;
+		}
+
+		/* else if(t.placePathDistances.len() >= 1){
+			HgLog.Info("Build empty return route:"+t.placePathDistances[0][0].GetName()+" used route:"+route);
+			BuildReturnRoute(route,null,t.placePathDistances[0][0]);
+		}*/
 		return null;
 	}
 	

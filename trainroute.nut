@@ -2053,6 +2053,7 @@ class TrainRoute extends Route {
 	
 	function Remove() {					
 		HgLog.Info("Remove route: "+this);
+		HgLog.Warning(GetRemovalDiagnostic("TrainRoute.Remove"));
 		saveData.isRemoved = isRemoved = true;
 		Close();
 	}
@@ -3155,6 +3156,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		
 		local engineSet = GetBuilt("engineSet");
 		local isBiDirectional = !isTransfer && dest.IsAcceptingAndProducing(cargo) && src.IsAcceptingAndProducing(cargo);
+		local summaryProduction = max(50,src.GetFutureExpectedProduction(cargo, AIVehicle.VT_RAIL));
 		local maxPlatformLength = 0;
 		if(dest instanceof StationGroup) {
 			foreach(route in dest.GetUsingRoutesAsSource()) {
@@ -3166,12 +3168,10 @@ class TrainRouteBuilder extends RouteBuilder {
 		if(engineSet==null) {
 			local subCargos = [];
 			local cargoProduction = {};
-			cargoProduction[cargo] <- max(50,src.GetFutureExpectedProduction(cargo, AIVehicle.VT_RAIL));
-			HgLog.Info("FutureExpectedProduction["+AICargo.GetName(cargo)+"]:"+cargoProduction[cargo]);
+			cargoProduction[cargo] <- summaryProduction;
 			foreach(c in src.GetProducingCargos()) {
 				if(c != cargo && dest.IsAcceptingCargo(c)) {
 					cargoProduction[c] <- src.GetFutureExpectedProduction(c, AIVehicle.VT_RAIL);
-					HgLog.Info("FutureExpectedProduction["+AICargo.GetName(cargo)+"]:"+cargoProduction[c]);
 				}
 			}
 			
@@ -3220,7 +3220,6 @@ class TrainRouteBuilder extends RouteBuilder {
 		}
 		local trainLength = (engineSet.length+15)/16;
 		HgLog.Info("TrainRoute railType:"+AIRail.GetName(engineSet.railType)+" isSingle:"+useSingle+" trainLength:"+trainLength);
-		HgLog.Info("PreEstimation:"+engineSet+" "+explain);
 		//HgLog.Info("AIRail.GetMaintenanceCostFactor:"+AIRail.GetMaintenanceCostFactor(engineSet.railType));	
 		AIRail.SetCurrentRailType(engineSet.railType);
 		
@@ -3397,7 +3396,13 @@ class TrainRouteBuilder extends RouteBuilder {
 			return null;
 		}
 		
-		HgLog.Info("TrainRoute pathDistance:"+route.pathDistance+" distance:"+route.GetDistance()+" "+route);
+		HgLog.Info("TrainRoute.BuildSummary routeId:"+route.id
+				+" pathDistance:"+route.pathDistance
+				+" distance:"+route.GetDistance()
+				+" production:"+summaryProduction
+				+" bidirectional:"+isBiDirectional
+				+" transfer:"+isTransfer
+				+" "+route);
 		if(route.routeTraceId != null) {
 			HgLog.Info("TrainRoute.Build succeeded trace:"+route.routeTraceId+" routeId:"+route.id+" "+route);
 		}

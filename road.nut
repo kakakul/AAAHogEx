@@ -51,7 +51,6 @@ class RoadRoute extends CommonRoute {
 			cnt = usedMap[tile] + 1;
 		}
 		usedMap.rawset(tile, cnt);
-		HgLog.Info("RoadRoute.AddUsedTile:"+HgTile(tile)+" cnt:"+cnt+" isTram:"+isTram);
 	}
 	
 	static function RemoveUsedTile(tile,isTram=false) {
@@ -60,13 +59,11 @@ class RoadRoute extends CommonRoute {
 			local cnt = usedMap[tile] - 1;
 			if(cnt >= 1) {
 				usedMap.rawset(tile, cnt);
-				HgLog.Info("RoadRoute.RemoveUsedTile:"+HgTile(tile)+" cnt:"+cnt+" isTram:"+isTram);
 				return false;
 			} else {
 				usedMap.rawdelete(tile);
 			}
 		}
-		HgLog.Info("RoadRoute.RemoveUsedTile:"+HgTile(tile)+" cnt:0 isTram:"+isTram);
 		return true;
 	}
 	
@@ -537,18 +534,30 @@ class RoadRoute extends CommonRoute {
 
 		local removableLines = [];
 		local line = [];
+		local removedTiles = 0;
+		local sharedOrForeignTiles = 0;
 		foreach(tile in usedTiles) {
 			if(RoadRoute.RemoveUsedTile(tile,isTram) && (isTram || AICompany.IsMine(AITile.GetOwner(tile))) 
 					/*&& !AITown.IsValidTown(AITile.GetTownAuthority(tile))*/) {
 				line.push(tile);
+				removedTiles++;
 			} else if(line.len() >= 1) {
+				sharedOrForeignTiles++;
 				removableLines.push(line);
 				line = [];
+			} else {
+				sharedOrForeignTiles++;
 			}
 		}
 		if(line.len() >= 1) {
 			removableLines.push(line);
 		}
+		HgLog.Info("RoadRoute.DemolishPlan route:"+this
+				+" isTram:"+isTram
+				+" usedTiles:"+usedTiles.len()
+				+" removableTiles:"+removedTiles
+				+" retainedTiles:"+sharedOrForeignTiles
+				+" removableLines:"+removableLines.len());
 		RoadRoute.DemolishLines(removableLines, isTram);
 		foreach(depot in depots) {
 			if( AIVehicleList_Depot(depot).Count() == 0 ) {
@@ -584,6 +593,20 @@ class RoadRoute extends CommonRoute {
 			return;
 		}
 		
+		local summary = {
+			lines = lines.len(),
+			tiles = 0,
+			skippedVehicleLines = 0,
+			notOwned = 0,
+			stillUsed = 0,
+			stations = 0,
+			bridges = 0,
+			tunnels = 0,
+			roads = 0,
+			unknown = 0,
+			pending = 0,
+			failures = 0
+		};
 		local pendingLines = RoadRoute.GetPendingDemolishLines(isTram);
 		local vehicles = AIVehicleList();
 		vehicles.Valuate(AIVehicle.GetVehicleType);
@@ -607,51 +630,75 @@ class RoadRoute extends CommonRoute {
 			}
 			if(skip) {
 				pendingLines.push(removeTiles);
+				summary.skippedVehicleLines++;
+				summary.pending++;
 				continue;
 			}
 			foreach(tile in removeTiles) {
+				summary.tiles++;
 				if(!isTram && !AICompany.IsMine(AITile.GetOwner(tile))) {
-					HgLog.Info("Not own tile:"+HgTile(tile));
+					summary.notOwned++;
 					continue;
 				}
 				if(RoadRoute.IsUsedTile(tile,isTram)) {
-					HgLog.Info("UsedTile tile:"+HgTile(tile));
+					summary.stillUsed++;
 					continue; // 削除が遅延していケースで、削除が決まった後から別路線が作られるケースがある
 				}
 				if(!isTram && AIRoad.IsRoadStationTile(tile)) {
-					HgLog.Info("RemoveRoadStation:"+HgTile(tile));
+					summary.stations++;
 					if(!BuildUtils.RemoveRoadStationSafe(tile)) {
 						HgLog.Warning("RemoveRoadStation failed:"+HgTile(tile)+" "+AIError.GetLastErrorString());
 						pendingLines.push([tile]);
+						summary.pending++;
+						summary.failures++;
 						continue;
 					}
 				}
 				if(AIBridge.IsBridgeTile(tile)) {
-					HgLog.Info("Remove Bridge:"+HgTile(tile));
+					summary.bridges++;
 					if(!BuildUtils.RemoveBridgeSafe(tile)) {
 						HgLog.Warning("RemoveBridgeSafe failed:"+HgTile(tile)+" "+AIError.GetLastErrorString());
 						pendingLines.push([tile]);
+						summary.pending++;
+						summary.failures++;
 					}
 				} else if(AITunnel.IsTunnelTile(tile)) {
-					HgLog.Info("Remove Tunnel:"+HgTile(tile));
+					summary.tunnels++;
 					if(!BuildUtils.RemoveTunnelSafe(tile)) {
 						HgLog.Warning("RemoveTunnelSafe failed:"+HgTile(tile)+" "+AIError.GetLastErrorString());
 						pendingLines.push([tile]);
+						summary.pending++;
+						summary.failures++;
 					}
 				} else if(AIRoad.IsRoadTile(tile)) {
-					HgLog.Info("Demolish Road:"+HgTile(tile));
+					summary.roads++;
 					RoadRoute.DemolishArroundDepot(tile);
 					if(!RoadRoute.DemolishRoadTileSafe(tile)) { 
 						HgLog.Warning("DemolishTile failed:"+HgTile(tile));
 						pendingLines.push([tile]);
+						summary.pending++;
+						summary.failures++;
 					}
 					//AITile.DemolishTile(pre); 重なっている線路や軌道も破壊してしまう
 					//AITile.DemolishTile(tile);
 				} else {
-					HgLog.Info("Unknown tile:"+HgTile(tile));
+					summary.unknown++;
 				}
 			}
-		}	
+		}
+		HgLog.Info("RoadRoute.DemolishLinesSummary isTram:"+isTram
+				+" lines:"+summary.lines
+				+" tiles:"+summary.tiles
+				+" roads:"+summary.roads
+				+" bridges:"+summary.bridges
+				+" tunnels:"+summary.tunnels
+				+" stations:"+summary.stations
+				+" notOwned:"+summary.notOwned
+				+" stillUsed:"+summary.stillUsed
+				+" unknown:"+summary.unknown
+				+" skippedVehicleLines:"+summary.skippedVehicleLines
+				+" pending:"+summary.pending
+				+" failures:"+summary.failures);
 	}
 	
 	static function DemolishRoadTileSafe(tile) {
@@ -821,7 +868,6 @@ class RoadRouteBuilder extends CommonRouteBuilder {
 	
 	function BuildStart(engineSet) {
 		local roadType = engineSet.infrastractureType; //GetSuitableRoadType(engineSet);
-		HgLog.Info("BuildStart RoadType:"+AIRoad.GetName(roadType)+" "+this);
 		AIRoad.SetCurrentRoadType(roadType);
 	}
 }
@@ -908,7 +954,6 @@ class RoadBuilder {
 		pathfinder.InitializePath(starts, goals, ignoreTiles);
 		
 		
-		HgLog.Info("RoadRoute Pathfinding...limit:"+pathFindLimit+" distance:"+distance);
 		local counter = 0;
 		local path = false;
 		while (path == false && counter < pathFindLimit) {
@@ -919,7 +964,6 @@ class RoadBuilder {
 			}
 		}
 		if (path != null && path != false) {
-			HgLog.Info("RoadRoute Path found. (" + counter + ")");
 		} else {
 			path = null;
 			HgLog.Warning("RoadRoute Pathfinding failed.");
@@ -1016,7 +1060,6 @@ class RoadBuilder {
 				}
 			}
 		}
-		HgLog.Info("BuildRoad Pathfinding succeeded");
 		return true;
 	}
 	
@@ -2235,6 +2278,4 @@ class TownBus {
 		return true;
 	}
 }
-
-
 
