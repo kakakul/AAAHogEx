@@ -3378,7 +3378,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		}
 		route.srcDepot = srcDepot;
 		route.isTransfer = isTransfer;
-		route.isSrcTransfer = IsSrcTransfer();
+		route.isSrcTransfer = IsSrcTransfer() || (options.rawin("forceSrcTransfer") && options.forceSrcTransfer);
 		route.isBiDirectional = isBiDirectional;
 		route.routeTraceId = options.rawin("routeTraceId") ? options.routeTraceId : null;
 		route.disableFullLoadOrder = options.rawin("disableFullLoadOrder") && options.disableFullLoadOrder;
@@ -3397,11 +3397,13 @@ class TrainRouteBuilder extends RouteBuilder {
 		}
 		
 		HgLog.Info("TrainRoute.BuildSummary routeId:"+route.id
+				+" trace:"+route.routeTraceId
 				+" pathDistance:"+route.pathDistance
 				+" distance:"+route.GetDistance()
 				+" production:"+summaryProduction
 				+" bidirectional:"+isBiDirectional
 				+" transfer:"+isTransfer
+				+" support:"+route.IsSupport()
 				+" "+route);
 		if(route.routeTraceId != null) {
 			HgLog.Info("TrainRoute.Build succeeded trace:"+route.routeTraceId+" routeId:"+route.id+" "+route);

@@ -4133,7 +4133,7 @@ class CommonRouteBuilder extends RouteBuilder {
 			route.srcHgStation = srcHgStation;
 			route.destHgStation = destHgStation;
 			route.isTransfer = IsTransfer();
-			route.isSrcTransfer = IsSrcTransfer();
+			route.isSrcTransfer = IsSrcTransfer() || GetOption("forceSrcTransfer", false);
 			route.isBiDirectional = isBiDirectional;
 			route.isWaitingProduction = isWaitingProduction;
 			route.isWaitingDestRoute = isWaitingDestRoute;
@@ -4190,11 +4190,13 @@ class CommonRouteBuilder extends RouteBuilder {
 			}
 			local routePathDistance = path == null ? 0 : path.GetTotalDistance(vehicleType);
 			HgLog.Info("CommonRouteBuilder.BuildSummary routeId:"+route.id
+					+" trace:"+route.routeTraceId
 					+" vt:"+route.GetLabel()
 					+" production:"+production
 					+" distance:"+distance
 					+" pathDistance:"+routePathDistance
 					+" bidirectional:"+isBiDirectional
+					+" support:"+route.IsSupport()
 					+" shareSrc:"+isShareSrcStation
 					+" shareDest:"+isShareDestStation
 					+" "+route);

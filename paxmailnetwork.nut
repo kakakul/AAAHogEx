@@ -5,8 +5,7 @@ class PaxMailNetwork {
 	static state = {
 		nextTraceId = 1,
 		pairBlacklist = {},
-		lastPerformanceYear = null,
-		nextFallbackGroup = "primary_spoke"
+		lastPerformanceYear = null
 	};
 }
 
@@ -320,9 +319,13 @@ class PaxMailNetwork {
 		candidate.score <- score;
 		candidate.role <- role;
 		candidate.priorityGroup <- group;
+		candidate.edgeDistance <- AIMap.DistanceManhattan(AITown.GetLocation(srcTown), AITown.GetLocation(destTown));
 		candidate.canChangeDest <- false;
 		candidate.allowNetworkDestReuse <- true;
 		candidate.disableFullLoadOrder <- true;
+		if(role == "spoke") {
+			candidate.forceSrcTransfer <- true;
+		}
 		if(vehicleType == AIVehicle.VT_RAIL) {
 			candidate.notUseSingle <- role == "hub";
 			candidate.allowSingleNetworkPaxMail <- role != "hub";
@@ -337,6 +340,7 @@ class PaxMailNetwork {
 					+" estimate:"+estimate.value
 					+" score:"+score
 					+" dist:"+dist
+					+" edgeDist:"+candidate.edgeDistance
 					+" production:"+production
 					+" src:"+AITown.GetName(srcTown)
 					+" dest:"+AITown.GetName(destTown));
@@ -462,38 +466,24 @@ class PaxMailNetwork {
 		local edges = [];
 		foreach(town in allTowns) {
 			if(hubSet.rawin(town)) continue;
-			local nearby = [];
+			local bestHub = null;
+			local bestDist = null;
 			foreach(hub in hubs) {
 				local dist = AIMap.DistanceManhattan(AITown.GetLocation(hub), AITown.GetLocation(town));
-				if(dist <= 100 && dist > 0) {
-					nearby.push({
-						hub = hub,
-						dist = dist
-					});
+				if(dist > 50 || dist <= 0) continue;
+				if(bestHub == null
+						|| dist < bestDist
+						|| (dist == bestDist && AITown.GetPopulation(hub) > AITown.GetPopulation(bestHub))) {
+					bestHub = hub;
+					bestDist = dist;
 				}
 			}
-			nearby.sort(function(a, b) {
-				if(a.dist != b.dist) return a.dist - b.dist;
-				return AITown.GetPopulation(b.hub) - AITown.GetPopulation(a.hub);
-			});
-
-			local selectedHubs = [];
-			foreach(item in nearby) {
-				local tooClose = false;
-				foreach(selectedHub in selectedHubs) {
-					if(AIMap.DistanceManhattan(AITown.GetLocation(item.hub), AITown.GetLocation(selectedHub)) <= 100) {
-						tooClose = true;
-						break;
-					}
-				}
-				if(tooClose) continue;
+			if(bestHub != null) {
 				edges.push({
-					srcTown = item.hub,
+					srcTown = bestHub,
 					destTown = town,
-					distance = item.dist,
-					isPrimary = selectedHubs.len() == 0
+					distance = bestDist
 				});
-				selectedHubs.push(item.hub);
 			}
 		}
 		return edges;
@@ -635,14 +625,6 @@ class PaxMailNetwork {
 		return best;
 	}
 
-	function PaxMailNetwork::HubHasSpoke(hub, hubSet, allTowns, paxCargo) {
-		foreach(town in allTowns) {
-			if(hubSet.rawin(town)) continue;
-			if(PaxMailNetwork.HasDirectTownRoute(hub, town, paxCargo)) return true;
-		}
-		return false;
-	}
-
 	function PaxMailNetwork::FindBestHubSpokeCandidate(allTowns, served, paxCargo) {
 		local hubs = PaxMailNetwork.GetHubTowns(allTowns);
 		local hubSet = PaxMailNetwork.MakeTownSet(hubs);
@@ -653,16 +635,6 @@ class PaxMailNetwork {
 		local hubExpansion = [];
 		local hubRedundancy = [];
 		local primarySpokes = [];
-		local noSpokePrimarySpokes = [];
-		local additionalSpokes = [];
-		local noSpokeHubs = {};
-
-		foreach(hub in hubs) {
-			if(!connectedHubs.rawin(hub)) continue;
-			if(!PaxMailNetwork.HubHasSpoke(hub, hubSet, allTowns, paxCargo)) {
-				noSpokeHubs.rawset(hub, true);
-			}
-		}
 
 		foreach(edge in hubEdges) {
 			local srcConnected = connectedHubs.rawin(edge.srcTown);
@@ -676,13 +648,8 @@ class PaxMailNetwork {
 
 		foreach(edge in spokeEdges) {
 			if(!connectedHubs.rawin(edge.srcTown)) continue;
-			if(edge.isPrimary && !served.rawin(edge.destTown)) {
+			if(!served.rawin(edge.destTown)) {
 				primarySpokes.push(edge);
-				if(noSpokeHubs.rawin(edge.srcTown)) {
-					noSpokePrimarySpokes.push(edge);
-				}
-			} else {
-				additionalSpokes.push(edge);
 			}
 		}
 
@@ -690,35 +657,16 @@ class PaxMailNetwork {
 				+" hubEdges:"+hubEdges.len()
 				+" hubExpansion:"+hubExpansion.len()
 				+" hasHubHubRoute:"+hasHubHubRoute
-				+" noSpokeHubs:"+noSpokeHubs.len()
-				+" noSpokePrimarySpokes:"+noSpokePrimarySpokes.len()
 				+" primarySpokes:"+primarySpokes.len()
-				+" hubRedundancy:"+hubRedundancy.len()
-				+" additionalSpokes:"+additionalSpokes.len());
+				+" hubRedundancy:"+hubRedundancy.len());
 
 		local groups = [];
-		local attempted = {};
 		if(!hasHubHubRoute) {
 			groups.push({ name = "hub_expansion", role = "hub", edges = hubExpansion });
-			attempted.rawset("hub_expansion", true);
-		}
-		if(noSpokeHubs.len() >= 1) {
-			groups.push({ name = "primary_spoke_no_spokes", role = "spoke", edges = noSpokePrimarySpokes });
-			attempted.rawset("primary_spoke_no_spokes", true);
-		}
-		groups.push({ name = "hub_redundancy", role = "hub", edges = hubRedundancy });
-		attempted.rawset("hub_redundancy", true);
-		groups.push({ name = "additional_spoke", role = "spoke", edges = additionalSpokes });
-		attempted.rawset("additional_spoke", true);
-
-		local fallbackGroup = PaxMailNetwork.state.nextFallbackGroup;
-		PaxMailNetwork.state.nextFallbackGroup = fallbackGroup == "primary_spoke" ? "hub_expansion" : "primary_spoke";
-		if(!attempted.rawin(fallbackGroup)) {
-			if(fallbackGroup == "hub_expansion") {
-				groups.push({ name = "hub_expansion", role = "hub", edges = hubExpansion });
-			} else {
-				groups.push({ name = "primary_spoke", role = "spoke", edges = primarySpokes });
-			}
+		} else {
+			groups.push({ name = "primary_spoke", role = "spoke", edges = primarySpokes });
+			groups.push({ name = "hub_redundancy", role = "hub", edges = hubRedundancy });
+			groups.push({ name = "hub_expansion", role = "hub", edges = hubExpansion });
 		}
 
 		foreach(group in groups) {
@@ -786,6 +734,7 @@ class PaxMailNetwork {
 					+" estimate:"+candidate.estimate.value
 					+" score:"+candidate.score
 					+" dist:"+candidate.distance
+					+" edgeDist:"+candidate.edgeDistance
 					+" production:"+candidate.production
 					+" "+candidate.explain);
 			ai.DoInterval();
