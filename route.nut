@@ -1419,7 +1419,8 @@ class Route {
 
 			if(!IsSupportRaw()
 					&& !(HogeAI.Get().IsNetworkMode()
-						&& (IsSrcTransfer()
+						&& (CargoUtils.IsPaxOrMail(cargo)
+							|| IsSrcTransfer()
 							|| (GetVehicleType() == AIVehicle.VT_ROAD && CargoUtils.IsPaxOrMail(cargo))))
 					&& (GetVehicleType() == AIVehicle.VT_ROAD || IsSingle())) {
 				local routes = [];
@@ -1989,6 +1990,7 @@ class CommonRoute extends Route {
 		depot = saveData.depot;
 		destDepot = saveData.destDepot;
 		useDepotOrder = saveData.useDepotOrder;
+		isSrcFullLoadOrder = saveData.rawin("isSrcFullLoadOrder") ? saveData.isSrcFullLoadOrder : true;
 		isDestFullLoadOrder = saveData.isDestFullLoadOrder;
 		
 		if(saveData.rawin("isClosed")) {
@@ -2024,6 +2026,7 @@ class CommonRoute extends Route {
 			destDepot = destDepot
 			useDepotOrder = useDepotOrder
 			useServiceOrder = useServiceOrder
+			isSrcFullLoadOrder = isSrcFullLoadOrder
 			isDestFullLoadOrder = isDestFullLoadOrder
 			
 			isClosed = isClosed
@@ -2218,6 +2221,8 @@ class CommonRoute extends Route {
 		local effectiveDestFullLoad = isTownBusRoute ? false : isDestFullLoadOrder;
 		if(isTownBusRoute) {
 			HgLog.Info("TownBus.NoFullLoadOrder "+this);
+		} else if(!effectiveSrcFullLoad && !effectiveDestFullLoad) {
+			HgLog.Info("CommonRoute.NoFullLoadOrder "+this);
 		}
 		local loadOrderFlags =  nonstopIntermediate | (!AITile.IsStationTile(srcHgStation.platformTile) ? 0 : (effectiveSrcFullLoad ? AIOrder.OF_FULL_LOAD_ANY : 0));
 		local srcOrderPosition = AIOrder.GetOrderCount(vehicle);
@@ -2567,6 +2572,9 @@ class CommonRoute extends Route {
 		local checkProfitable = !IsSupport() && (emergency || AIDate.GetMonth(AIDate.GetCurrentDate()) >= 10);
 		local latestEngineSet = GetLatestEngineSet();
 		local checkAge = emergency ? latestEngineSet != null && min(latestEngineSet.days,800) : 800;
+		if(vehicleType == AIVehicle.VT_WATER && latestEngineSet != null) {
+			checkAge = max(checkAge, latestEngineSet.days * 2);
+		}
 		if(checkProfitable) { // transferはトータルで利益を上げていれば問題ない。 TODO:トータルで利益を上げているかのチェック
 			foreach(vehicle,v in vehicleList) {
 				local age = GetStartAge(vehicle);
@@ -2588,6 +2596,9 @@ class CommonRoute extends Route {
 		//productionの減少やライバル社がやってきた場合に減らす処理
 		if(vehicleType == AIVehicle.VT_WATER) {
 			local keepNum = tooMany ? 2 : 3;
+			local reduceAge = latestEngineSet != null ? max(365, latestEngineSet.days) : 365;
+			vehicleList.Valuate(CommonRoute.GetStartAge);
+			vehicleList.KeepAboveValue(reduceAge);
 			vehicleList.Valuate(AIVehicle.GetState);
 			vehicleList.KeepValue(AIVehicle.VS_AT_STATION);
 			vehicleList.Valuate(AIVehicle.GetCargoLoad, cargo);
@@ -4098,6 +4109,10 @@ class CommonRouteBuilder extends RouteBuilder {
 			route.isWaitingProduction = isWaitingProduction;
 			route.isWaitingDestRoute = isWaitingDestRoute;
 			route.routeTraceId = GetOption("routeTraceId", null);
+			if(GetOption("disableFullLoadOrder", false)) {
+				route.isSrcFullLoadOrder = false;
+				route.isDestFullLoadOrder = false;
+			}
 			route.isBuilding = true;
 			
 			if(HogeAI.Get().openttdVersion >= 14 && route.GetVehicleType() == AIVehicle.VT_WATER && route.isTransfer && !isWaitingDestRoute) {

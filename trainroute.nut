@@ -158,6 +158,7 @@ class TrainRoute extends Route {
 		trainRoute.sharedRailPaths = t.sharedRailPaths;
 		trainRoute.parentRouteId = t.parentRouteId;
 		trainRoute.consumedJunction = t.consumedJunction;
+		trainRoute.disableFullLoadOrder = t.rawin("disableFullLoadOrder") ? t.disableFullLoadOrder : false;
 		trainRoute.saveData = t;
 		//trainRoute.usedRateHistory = t.rawin("usedRateHistory") ? t.usedRateHistory : [];
 		trainRoute.InitializeCargoSet();
@@ -312,6 +313,7 @@ class TrainRoute extends Route {
 	sharedRailPaths = null;
 	parentRouteId = null;
 	consumedJunction = null;
+	disableFullLoadOrder = null;
 
 	saveData = null;
 	
@@ -352,6 +354,7 @@ class TrainRoute extends Route {
 		this.sharedRailPaths = [];
 		this.parentRouteId = null;
 		this.consumedJunction = null;
+		this.disableFullLoadOrder = false;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -414,6 +417,7 @@ class TrainRoute extends Route {
 		t.sharedRailPaths <- sharedRailPaths;
 		t.parentRouteId <- parentRouteId;
 		t.consumedJunction <- consumedJunction;
+		t.disableFullLoadOrder <- disableFullLoadOrder;
 		t.returnRoute <- null; // SaveStaticで保存する
 		saveData = t;
 	}
@@ -1480,7 +1484,10 @@ class TrainRoute extends Route {
 	function BuildOrder(engineVehicle) {
 		local execMode = AIExecMode();
 		local isNetworkMode = HogeAI.Get().IsNetworkMode();
-		local loadOrderFlags = AIOrder.OF_FULL_LOAD_ANY + AIOrder.OF_NON_STOP_INTERMEDIATE;
+		local loadOrderFlags = AIOrder.OF_NON_STOP_INTERMEDIATE | (disableFullLoadOrder ? 0 : AIOrder.OF_FULL_LOAD_ANY);
+		if(disableFullLoadOrder) {
+			HgLog.Info("TrainRoute.NoFullLoadOrder "+this);
+		}
 		AIOrder.AppendOrder(engineVehicle, srcHgStation.platformTile, loadOrderFlags);
 		AIOrder.SetStopLocation	(engineVehicle, AIOrder.GetOrderCount(engineVehicle)-1, AIOrder.STOPLOCATION_MIDDLE);
 		AIOrder.AppendOrder(engineVehicle, srcDepot, AIOrder.OF_SERVICE_IF_NEEDED);
@@ -3128,7 +3135,10 @@ class TrainRouteBuilder extends RouteBuilder {
 	function BuildRoute(dest, src, cargo, options) {
 		local distance = AIMap.DistanceManhattan(src.GetLocation(), dest.GetLocation());
 		local isTransfer = options.rawin("transfer") ? options.transfer : (dest instanceof StationGroup);
-		local isSingleOrNot = (options.rawin("notUseSingle") && options.notUseSingle) || (src instanceof Place && src.IsProcessing()) || (CargoUtils.IsPaxOrMail(cargo) && HogeAI.Get().IsNetworkMode()) ? false : null;
+		local allowSingleNetworkPaxMail = options.rawin("allowSingleNetworkPaxMail") && options.allowSingleNetworkPaxMail;
+		local isSingleOrNot = (options.rawin("notUseSingle") && options.notUseSingle)
+				|| (src instanceof Place && src.IsProcessing())
+				|| (CargoUtils.IsPaxOrMail(cargo) && HogeAI.Get().IsNetworkMode() && !allowSingleNetworkPaxMail) ? false : null;
 		if(isSingleOrNot==null && options.rawin("estimate")) {
 			isSingleOrNot = options.estimate.isSingle;
 		}
@@ -3202,7 +3212,7 @@ class TrainRouteBuilder extends RouteBuilder {
 			SetBuilt("engineSet",engineSet);
 		}
 		local useSingle = engineSet.isSingle; //HogeAI.Get().GetUsableMoney() < HogeAI.Get().GetInflatedMoney(100000) && !HogeAI.Get().HasIncome(20000);
-		if(HogeAI.Get().IsNetworkMode()) {
+		if(HogeAI.Get().IsNetworkMode() && (!CargoUtils.IsPaxOrMail(cargo) || !allowSingleNetworkPaxMail)) {
 			useSingle = false; // Force network-mode train routes to be double tracked
 		}
 		if(useSingle) {
@@ -3372,6 +3382,7 @@ class TrainRouteBuilder extends RouteBuilder {
 		route.isSrcTransfer = IsSrcTransfer();
 		route.isBiDirectional = isBiDirectional;
 		route.routeTraceId = options.rawin("routeTraceId") ? options.routeTraceId : null;
+		route.disableFullLoadOrder = options.rawin("disableFullLoadOrder") && options.disableFullLoadOrder;
 		route.AddDepotInfos(railBuilder.depotInfos);
 		route.Initialize();
 		if(!canChangeDest) {

@@ -1219,6 +1219,12 @@ class HogeAI extends AIController {
 		if(t.rawin("sharableStationOnly")) {
 			builderOptions.sharableStationOnly <- t.sharableStationOnly;
 		}
+		if(t.rawin("allowSingleNetworkPaxMail")) {
+			builderOptions.allowSingleNetworkPaxMail <- t.allowSingleNetworkPaxMail;
+		}
+		if(t.rawin("disableFullLoadOrder")) {
+			builderOptions.disableFullLoadOrder <- t.disableFullLoadOrder;
+		}
 		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, builderOptions);
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);

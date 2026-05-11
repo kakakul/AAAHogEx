@@ -1625,15 +1625,26 @@ class DestRailStationFactory extends RailStationFactory {
 	}
 
 	function GetPlatformNum() {
+		if(useSingle) {
+			return 1;
+		} else if(useSimple) {
+			return 2;
+		}
 		return platformNum;
 	}
 	function GetPlatformLength() {
 		return platformLength;
 	}
 	function Create(platformTile,stationDirection) {
+		if(useSingle || useSimple) {
+			return SimpleRailStation(platformTile, GetPlatformNum(), GetPlatformLength(), stationDirection);
+		}
 		return SmartStation(platformTile, platformNum, GetPlatformLength(), stationDirection);
 	}
 	function GetTypeName() {
+		if(useSingle || useSimple) {
+			return "SimpleRailStation";
+		}
 		return "DestRailStationFactory";
 	}
 }
