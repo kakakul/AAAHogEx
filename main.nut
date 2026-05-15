@@ -3839,6 +3839,7 @@ class HogeAI extends AIController {
 		routes.extend(RoadRoute.instances);
 		routes.extend(WaterRoute.instances);
 		routes.extend(AirRoute.instances);
+		Route.PrintStationDemandDiagnostics();
 		local list = AIList();
 		foreach(index,_ in routes) {
 			list.AddItem(index, AIBase.Rand());

@@ -2217,6 +2217,14 @@ class TrainRoute extends Route {
 
 	function IsWaitingCargoForCloneTrain() {
 		foreach(cargo in GetCargos()) {
+			if(IsNetworkPaxMailWaitingCapacityMode(cargo)) {
+				local pressure = GetRouteWaitingPressure(cargo);
+				if(pressure.allowed) {
+					HgLog.Info("TrainRouteWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" "+this);
+					return true;
+				}
+				continue;
+			}
 			local capacity = GetCargoCapacity(cargo);
 			if(capacity == 0) {
 				continue;
@@ -2562,6 +2570,10 @@ class TrainRoute extends Route {
 		if(isClosed || isRemoved || updateRailDepot!=null || IsSingle()) {
 			return;
 		}
+		if(IsVehicleBuyBlocked()) {
+			HgLog.Info(GetVehicleBuyBlockLog());
+			return;
+		}
 		if(lostSuppressUntil > 0) {
 			local today = AIDate.GetCurrentDate();
 			if(today < lostSuppressUntil) return;
@@ -2638,6 +2650,13 @@ class TrainRoute extends Route {
 			}
 			local waiting = CargoUtils.GetEffectiveCargoWaiting(srcHgStation.stationId, destHgStation.stationId, cargo);
 			local capacity = GetCargoCapacity(cargo);
+			local waitingPressure = null;
+			if(IsNetworkPaxMailWaitingCapacityMode(cargo)) {
+				waitingPressure = GetRouteWaitingPressure(cargo);
+				if(waitingPressure.enabled) {
+					waiting = waitingPressure.pressure;
+				}
+			}
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null) numClone = min(numClone, maxTrains - numVehicles);
 			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
@@ -2649,6 +2668,10 @@ class TrainRoute extends Route {
 				}
 			}
 			numClone = max(1,min( numClone, waiting / capacity ));
+			if(waitingPressure != null && waitingPressure.enabled) {
+				numClone = min(numClone, max(1, waitingPressure.requiredVehicles - numVehicles));
+				HgLog.Info("TrainRouteCloneWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
+			}
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
 			for(local i=0; i<numClone; i++) {
 				CloneAndStartTrain(false,latestVehicle);
