@@ -2190,7 +2190,7 @@ class CommonRoute extends Route {
 			if(AIBase.RandRange(2) == 0) {
 				this.AppendRemoveOrder(v);
 				this.maxVehicles = min(vehicleList.Count(), this.maxVehicles);
-				this.maxVehicles = max(0, this.maxVehicles - 1);
+				this.maxVehicles = max(IsSupport() ? 1 : 0, this.maxVehicles - 1);
 				saveData.maxVehicles = this.maxVehicles;
 			}
 		}
