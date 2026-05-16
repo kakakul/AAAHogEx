@@ -746,7 +746,7 @@ class HogeAI extends AIController {
 		indexPointer = 3; // ++
 		while (true) {
 			CalculateProfitModel();
-			HgLog.Info("######## turn:"+turn+ " "+ GetProfitModelName() + " ######## { ");
+			HgLog.Info("######## turn:"+turn+ " "+ GetProfitModelName() + " ######## ");
 			prevLoadAmount = currentLoanAmount;
 			currentLoanAmount = AICompany.GetLoanAmount();
 			ResetEstimateTable();
@@ -761,8 +761,7 @@ class HogeAI extends AIController {
 			}
 			indexPointer = 0;
 			turn ++;
-			WaitDays(1);
-			HgLog.Info("}");
+			WaitDays(10);
 		}
 	}
 	
