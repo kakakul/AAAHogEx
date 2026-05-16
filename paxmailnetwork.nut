@@ -230,9 +230,20 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::GetShortestNetworkDistance(graph, fromTown, toTown) {
-		if(fromTown == toTown) return 0;
+		local result = PaxMailNetwork.GetShortestNetworkPath(graph, fromTown, toTown);
+		return result == null ? null : result.distance;
+	}
+
+	function PaxMailNetwork::GetShortestNetworkPath(graph, fromTown, toTown) {
+		if(fromTown == toTown) {
+			return {
+				distance = 0,
+				edges = []
+			};
+		}
 		local dist = {};
 		local done = {};
+		local prev = {};
 		dist.rawset(fromTown, 0);
 
 		while(true) {
@@ -246,7 +257,24 @@ class PaxMailNetwork {
 				}
 			}
 			if(bestTown == null) return null;
-			if(bestTown == toTown) return bestDist;
+			if(bestTown == toTown) {
+				local pathEdges = [];
+				local cursor = toTown;
+				while(cursor != fromTown) {
+					if(!prev.rawin(cursor)) return null;
+					local step = prev[cursor];
+					pathEdges.insert(0, {
+						srcTown = step.town,
+						destTown = cursor,
+						distance = step.distance
+					});
+					cursor = step.town;
+				}
+				return {
+					distance = bestDist,
+					edges = pathEdges
+				};
+			}
 			done.rawset(bestTown, true);
 			if(!graph.rawin(bestTown)) continue;
 			foreach(nextTown, edgeDist in graph[bestTown]) {
@@ -254,6 +282,10 @@ class PaxMailNetwork {
 				local nextDist = bestDist + edgeDist;
 				if(!dist.rawin(nextTown) || nextDist < dist[nextTown]) {
 					dist.rawset(nextTown, nextDist);
+					prev.rawset(nextTown, {
+						town = bestTown,
+						distance = edgeDist
+					});
 				}
 			}
 		}
@@ -323,7 +355,7 @@ class PaxMailNetwork {
 		candidate.canChangeDest <- false;
 		candidate.allowNetworkDestReuse <- true;
 		candidate.disableFullLoadOrder <- true;
-		if(role == "spoke") {
+		if(role == "spoke" || group == "hub_shortcut" || group == "hub_shortcut_support") {
 			candidate.forceSrcTransfer <- true;
 		}
 		if(vehicleType == AIVehicle.VT_RAIL) {
@@ -348,7 +380,7 @@ class PaxMailNetwork {
 		return candidate;
 	}
 
-	function PaxMailNetwork::ProbeRoadPathDistance(src, dest, paxCargo, estimate, manhattanDistance) {
+	function PaxMailNetwork::ProbeRoadPathDistance(src, dest, paxCargo, estimate, manhattanDistance, maxPathDistance = 100) {
 		if(estimate == null || !("engine" in estimate) || estimate.engine == null) {
 			HgLog.Warning("PaxMailNetwork.RoadProbe rejected reason:no_engine dist:"+manhattanDistance
 					+" src:"+src.GetName()+" dest:"+dest.GetName());
@@ -372,7 +404,7 @@ class PaxMailNetwork {
 		}
 
 		local pathDistance = Path.FromPath(path).GetTotalDistance(AIVehicle.VT_ROAD);
-		if(pathDistance > 100) {
+		if(pathDistance > maxPathDistance) {
 			HgLog.Info("PaxMailNetwork.RoadProbe rejected reason:too_far dist:"+manhattanDistance
 					+" pathDist:"+pathDistance+" src:"+src.GetName()+" dest:"+dest.GetName());
 			return null;
@@ -406,7 +438,18 @@ class PaxMailNetwork {
 		return result;
 	}
 
-	function PaxMailNetwork::GetPrunedHubEdges(hubs) {
+	function PaxMailNetwork::AddShortcutSupportEdges(supportEdges, seen, pathEdges) {
+		foreach(pathEdge in pathEdges) {
+			local a = min(pathEdge.srcTown, pathEdge.destTown);
+			local b = max(pathEdge.srcTown, pathEdge.destTown);
+			local key = a+"-"+b;
+			if(seen.rawin(key)) continue;
+			seen.rawset(key, true);
+			supportEdges.push(pathEdge);
+		}
+	}
+
+	function PaxMailNetwork::GetPrunedHubEdges(hubs, connectedHubs = null, paxCargo = null) {
 		local edges = [];
 		for(local i = 0; i < hubs.len(); i++) {
 			for(local j = i + 1; j < hubs.len(); j++) {
@@ -424,15 +467,29 @@ class PaxMailNetwork {
 		});
 
 		local kept = [];
+		local shortcutSupportEdges = [];
+		local shortcutSupportSeen = {};
 		local graph = {};
 		foreach(edge in edges) {
-			local pathDistance = PaxMailNetwork.GetShortestNetworkDistance(graph, edge.srcTown, edge.destTown);
-			if(pathDistance != null && pathDistance * 2 <= edge.distance * 3) continue;
+			local path = PaxMailNetwork.GetShortestNetworkPath(graph, edge.srcTown, edge.destTown);
+			if(path != null && path.distance * 2 <= edge.distance * 3) {
+				if(connectedHubs != null
+						&& paxCargo != null
+						&& connectedHubs.rawin(edge.srcTown)
+						&& connectedHubs.rawin(edge.destTown)
+						&& !PaxMailNetwork.HasDirectTownRoute(edge.srcTown, edge.destTown, paxCargo)) {
+					PaxMailNetwork.AddShortcutSupportEdges(shortcutSupportEdges, shortcutSupportSeen, path.edges);
+				}
+				continue;
+			}
 			kept.push(edge);
 			PaxMailNetwork.AddGraphEdge(graph, edge.srcTown, edge.destTown, edge.distance);
 			PaxMailNetwork.AddGraphEdge(graph, edge.destTown, edge.srcTown, edge.distance);
 		}
-		return kept;
+		return {
+			hubEdges = kept,
+			shortcutSupportEdges = shortcutSupportEdges
+		};
 	}
 
 	function PaxMailNetwork::GetConnectedHubs(hubs, served) {
@@ -502,8 +559,11 @@ class PaxMailNetwork {
 		local production = max(30, (AITown.GetPopulation(srcTown) + AITown.GetPopulation(destTown)) / 20);
 		local bestCandidate = null;
 		local rejectedModes = 0;
+		local isHubShortcut = group == "hub_shortcut" || group == "hub_shortcut_support";
+		local roadMaxDistance = isHubShortcut ? 200 : 100;
+		local airMinDistance = isHubShortcut ? 100 : 150;
 
-		if(dist > 100) {
+		if(dist > roadMaxDistance) {
 			PaxMailNetwork.CountReject(rejectStats, "roadDistance");
 			rejectedModes++;
 		} else if(!RoadRoute.IsTooManyVehiclesForNewRoute(RoadRoute)) {
@@ -520,7 +580,7 @@ class PaxMailNetwork {
 				local infraTypes = RoadRoute.GetDefaultInfrastractureTypes();
 				local est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, dist, min(production, 340), true, infraTypes);
 				if(probeRoad) {
-					local pathDist = PaxMailNetwork.ProbeRoadPathDistance(src, dest, paxCargo, est, dist);
+					local pathDist = PaxMailNetwork.ProbeRoadPathDistance(src, dest, paxCargo, est, dist, roadMaxDistance);
 					if(pathDist != null) {
 						est = Route.Estimate(AIVehicle.VT_ROAD, paxCargo, pathDist, min(production, 340), true, infraTypes);
 						bestCandidate = PaxMailNetwork.MaybeUsePlannedCandidate(bestCandidate, srcTown, destTown, paxCargo,
@@ -584,7 +644,7 @@ class PaxMailNetwork {
 			}
 		}
 
-		if(dist < 150) {
+		if(dist < airMinDistance) {
 			PaxMailNetwork.CountReject(rejectStats, "airDistance");
 			rejectedModes++;
 		} else if(AirRoute.IsTooManyVehiclesForNewRoute(AirRoute)) {
@@ -629,11 +689,14 @@ class PaxMailNetwork {
 		local hubs = PaxMailNetwork.GetHubTowns(allTowns);
 		local hubSet = PaxMailNetwork.MakeTownSet(hubs);
 		local connectedHubs = PaxMailNetwork.GetConnectedHubs(hubs, served);
-		local hubEdges = PaxMailNetwork.GetPrunedHubEdges(hubs);
+		local hubPlan = PaxMailNetwork.GetPrunedHubEdges(hubs, connectedHubs, paxCargo);
+		local hubEdges = hubPlan.hubEdges;
+		local shortcutSupportEdges = hubPlan.shortcutSupportEdges;
 		local spokeEdges = PaxMailNetwork.GetSpokeEdges(hubs, hubSet, allTowns);
 		local hasHubHubRoute = PaxMailNetwork.HasHubHubRoute(hubs, paxCargo);
 		local hubExpansion = [];
-		local hubRedundancy = [];
+		local hubShortcuts = [];
+		local hubShortcutSupport = [];
 		local primarySpokes = [];
 
 		foreach(edge in hubEdges) {
@@ -642,8 +705,12 @@ class PaxMailNetwork {
 			if(srcConnected != destConnected) {
 				hubExpansion.push(PaxMailNetwork.OrientHubEdge(edge, connectedHubs));
 			} else if(srcConnected && destConnected) {
-				hubRedundancy.push(edge);
+				hubShortcuts.push(edge);
 			}
+		}
+
+		foreach(edge in shortcutSupportEdges) {
+			hubShortcutSupport.push(PaxMailNetwork.OrientHubEdge(edge, connectedHubs));
 		}
 
 		foreach(edge in spokeEdges) {
@@ -658,14 +725,16 @@ class PaxMailNetwork {
 				+" hubExpansion:"+hubExpansion.len()
 				+" hasHubHubRoute:"+hasHubHubRoute
 				+" primarySpokes:"+primarySpokes.len()
-				+" hubRedundancy:"+hubRedundancy.len());
+				+" hubShortcutSupport:"+hubShortcutSupport.len()
+				+" hubShortcuts:"+hubShortcuts.len());
 
 		local groups = [];
 		if(!hasHubHubRoute) {
 			groups.push({ name = "hub_expansion", role = "hub", edges = hubExpansion });
 		} else {
 			groups.push({ name = "primary_spoke", role = "spoke", edges = primarySpokes });
-			groups.push({ name = "hub_redundancy", role = "hub", edges = hubRedundancy });
+			groups.push({ name = "hub_shortcut_support", role = "hub", edges = hubShortcutSupport });
+			groups.push({ name = "hub_shortcut", role = "hub", edges = hubShortcuts });
 			groups.push({ name = "hub_expansion", role = "hub", edges = hubExpansion });
 		}
 
