@@ -421,7 +421,7 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::GetHubTowns(allTowns) {
-		local hubCount = max(3, (allTowns.len() + 4) / 5);
+		local hubCount = max(3, (allTowns.len() + 2) / 3);
 		hubCount = min(hubCount, allTowns.len());
 		local hubs = [];
 		for(local i = 0; i < hubCount; i++) {
