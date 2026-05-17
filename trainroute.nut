@@ -518,7 +518,7 @@ class TrainRoute extends Route {
 			reason = reason
 		};
 		SaveRedesignTransition();
-		HgLog.Warning("TrainRouteRedesignTransition start reason:"+reason
+		HgLog.Info("TrainRouteRedesignTransition start reason:"+reason
 				+" oldVehicles:"+oldVehicles
 				+" target:"+targetVehicles
 				+" oldCap:"+oldCapacity

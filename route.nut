@@ -77,62 +77,7 @@ class Route {
 	}
 
 	static function PrintStationDemandDiagnostics() {
-		if(!HogeAI.Get().IsNetworkMode()) return;
-		local currentDate = AIDate.GetCurrentDate();
-		if(Route.demandDiagState.lastDate + 180 > currentDate) return;
-		Route.demandDiagState.lastDate = currentDate;
-
-		local stationCargo = {};
-		foreach(route in Route.GetAllRoutes()) {
-			if(route.IsClosed() || route.IsRemoved() || !CargoUtils.IsPaxOrMail(route.cargo)) continue;
-			if(route.srcHgStation != null && route.srcHgStation.stationGroup != null) {
-				stationCargo.rawset(route.srcHgStation.stationGroup.id+"-"+route.cargo, {
-					stationGroup = route.srcHgStation.stationGroup,
-					cargo = route.cargo
-				});
-			}
-			if(route.IsBiDirectional() && route.destHgStation != null && route.destHgStation.stationGroup != null) {
-				stationCargo.rawset(route.destHgStation.stationGroup.id+"-"+route.cargo, {
-					stationGroup = route.destHgStation.stationGroup,
-					cargo = route.cargo
-				});
-			}
-		}
-
-		foreach(_, info in stationCargo) {
-			local stationGroup = info.stationGroup;
-			local cargo = info.cargo;
-			if(stationGroup.hgStations.len() == 0) continue;
-			local routes = stationGroup.GetRoutesUsingSource(cargo);
-			local totalWaiting = AIStation.GetCargoWaiting(stationGroup.GetAIStation(), cargo);
-			HgLog.Info("StationDemandDiag station:"+stationGroup.GetName()
-					+" cargo:"+AICargo.GetName(cargo)
-					+" totalWaiting:"+totalWaiting
-					+" routes:"+routes.len());
-			foreach(route in routes) {
-				if(route.IsClosed() || route.IsRemoved()) continue;
-				local otherStation = route.GetOtherSideStation(stationGroup);
-				if(otherStation == null || otherStation.stationGroup == null) continue;
-				local viaWaiting = CargoUtils.GetEffectiveCargoWaiting(stationGroup.GetAIStation(), otherStation.stationId, cargo);
-				local isDest = route.destHgStation.stationGroup == stationGroup;
-				HgLog.Info("StationDemandRoute routeId:"+route.id
-						+" trace:"+route.routeTraceId
-						+" vt:"+route.GetLabel()
-						+" support:"+route.IsSupport()
-						+" from:"+stationGroup.GetName()
-						+" to:"+otherStation.stationGroup.GetName()
-						+" totalWaiting:"+totalWaiting
-						+" viaWaiting:"+viaWaiting
-						+" needsAdditional:"+route.NeedsAdditionalProducingCargo(cargo, null, isDest)
-						+" leftCapacity:"+route.GetLeftCapacity(cargo, isDest, null)
-						+" leftReason:"+route.GetLeftCapacityReason(cargo, isDest, null)
-						+" "+route.GetRouteWaitingPressureLog(cargo)
-						+" avgLoadPct:"+route.GetAverageCargoLoadPct(cargo)
-						+" vehicles:"+route.GetVehicleList().Count()
-						+" maxVehicles:"+route.GetMaxVehicles()
-						+" "+route);
-			}
-		}
+		return;
 	}
 
 	static function EstimateBestVehicleType(cargo, distance, production, isBidirectional) {
@@ -1099,7 +1044,7 @@ class Route {
 			}
 		}
 		if(result.advanced) {
-			HgLog.Warning("RouteCapacityStrike reason:"+reason
+			HgLog.Info("RouteCapacityStrike reason:"+reason
 					+" count:"+strike.count
 					+" first:"+DateUtils.ToString(strike.firstDate)
 					+" last:"+DateUtils.ToString(strike.lastDate)
@@ -3305,17 +3250,12 @@ class CommonRoute extends Route {
 	}
 	
 	function CheckBuildVehicle() {
-		local c = PerformanceCounter.Start("CheckBuildVehicle");	
 		_CheckBuildVehicle();
-		c.Stop();
 	}
 	
 	function _CheckBuildVehicle() {
 	
 		local showLog = false; //srcHgStation.GetName().find("0349") != null;
-		if(showLog) {
-			HgLog.Info("_CheckBuildVehicle "+this);
-		}
 
 		if(isWaitingProduction) {
 			if(GetProduction() == 0) {
@@ -3857,9 +3797,7 @@ class CommonRoute extends Route {
 	}
 	
 	function CheckRenewal() {
-		local c = PerformanceCounter.Start("CheckRenewal");	
 		_CheckRenewal();
-		c.Stop();
 	}
 	
 	// tmpClose: 一時的に受け入れが拒否されている remove:　削除シーケンスへ入った

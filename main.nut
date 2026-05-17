@@ -3822,7 +3822,6 @@ class HogeAI extends AIController {
 			}
 			pre = time;
 		}
-		HgLog.Info("CheckTrainRoute "+ s);
 		PerformanceCounter.Print();
 	}
 	 
@@ -4013,8 +4012,6 @@ class HogeAI extends AIController {
 			}
 		}*/
 		
-		HgLog.Info("DoInterval {");
-		
 		supressInterval = true;
 		UpdateSettings();
 		
@@ -4075,7 +4072,6 @@ class HogeAI extends AIController {
 		AIRail.SetCurrentRailType(currentRailType);
 		AIRoad.SetCurrentRoadType(currentRoadType);
 		supressInterval = false;
-		HgLog.Info("}");
 	}
 
 	function OnPathFindingInterval() {
