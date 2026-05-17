@@ -156,6 +156,7 @@ class TrainRoute extends Route {
 		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
 		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
 		trainRoute.capacityRedesignDate = t.rawin("capacityRedesignDate") ? t.capacityRedesignDate : null;
+		trainRoute.redesignTransition = t.rawin("redesignTransition") ? t.redesignTransition : null;
 		trainRoute.sharedRailPaths = t.sharedRailPaths;
 		trainRoute.parentRouteId = t.parentRouteId;
 		trainRoute.consumedJunction = t.consumedJunction;
@@ -312,6 +313,7 @@ class TrainRoute extends Route {
 	lostVehicleCount = null;
 	lostSuppressUntil = null;
 	capacityRedesignDate = null;
+	redesignTransition = null;
 	sharedRailPaths = null;
 	parentRouteId = null;
 	consumedJunction = null;
@@ -354,6 +356,7 @@ class TrainRoute extends Route {
 		this.lostVehicleCount = 0;
 		this.lostSuppressUntil = 0;
 		this.capacityRedesignDate = null;
+		this.redesignTransition = null;
 		this.sharedRailPaths = [];
 		this.parentRouteId = null;
 		this.consumedJunction = null;
@@ -418,6 +421,7 @@ class TrainRoute extends Route {
 		t.lostVehicleCount <- lostVehicleCount;
 		t.lostSuppressUntil <- lostSuppressUntil;
 		t.capacityRedesignDate <- capacityRedesignDate;
+		t.redesignTransition <- redesignTransition;
 		t.sharedRailPaths <- sharedRailPaths;
 		t.parentRouteId <- parentRouteId;
 		t.consumedJunction <- consumedJunction;
@@ -451,6 +455,198 @@ class TrainRoute extends Route {
 
 	function IsNetworkFreightRoute() {
 		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
+	}
+
+	function IsNetworkPaxMailRoute() {
+		return HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo);
+	}
+
+	function GetActiveTrainVehicleCount() {
+		local result = 0;
+		foreach(vehicle, _ in GetVehicleList()) {
+			if(!CommonRoute.vehicleRemoving.rawin(vehicle)) {
+				result++;
+			}
+		}
+		return result;
+	}
+
+	function CountVehiclesMatchingEngineSet(engineSet, includeRemoving=false) {
+		if(engineSet == null) return 0;
+		local result = 0;
+		foreach(vehicle, _ in GetVehicleList()) {
+			if(!includeRemoving && CommonRoute.vehicleRemoving.rawin(vehicle)) continue;
+			if(HasVehicleEngineSet(vehicle, engineSet)) {
+				result++;
+			}
+		}
+		return result;
+	}
+
+	function SaveRedesignTransition() {
+		if(saveData != null) {
+			saveData.rawset("redesignTransition", redesignTransition);
+		}
+	}
+
+	function ClearRedesignTransition(reason) {
+		if(redesignTransition != null) {
+			HgLog.Info("TrainRouteRedesignTransition clear reason:"+reason+" "+this);
+		}
+		redesignTransition = null;
+		SaveRedesignTransition();
+	}
+
+	function StartRedesignTransition(oldEngineSet, newEngineSet, reason) {
+		if(!IsNetworkPaxMailRoute()) return;
+		if(oldEngineSet == null || newEngineSet == null) return;
+		if(redesignTransition != null) return;
+		local oldVehicles = GetActiveTrainVehicleCount();
+		if(oldVehicles <= 0) return;
+		if(CountVehiclesMatchingEngineSet(newEngineSet, true) >= oldVehicles) return;
+		local oldCapacity = GetEngineSetCargoCapacity(oldEngineSet, cargo);
+		local newCapacity = GetEngineSetCargoCapacity(newEngineSet, cargo);
+		if(oldCapacity <= 0 || newCapacity <= 0) return;
+		local targetByCapacity = (oldVehicles * oldCapacity + newCapacity - 1) / newCapacity;
+		local targetVehicles = max(oldVehicles, targetByCapacity);
+		redesignTransition = {
+			startDate = AIDate.GetCurrentDate(),
+			targetVehicles = targetVehicles,
+			oldVehicles = oldVehicles,
+			oldCapacity = oldCapacity,
+			newCapacity = newCapacity,
+			reason = reason
+		};
+		SaveRedesignTransition();
+		HgLog.Warning("TrainRouteRedesignTransition start reason:"+reason
+				+" oldVehicles:"+oldVehicles
+				+" target:"+targetVehicles
+				+" oldCap:"+oldCapacity
+				+" newCap:"+newCapacity
+				+" "+this);
+	}
+
+	function GetRedesignTransitionTargetVehicles() {
+		if(redesignTransition == null) return null;
+		if(!IsNetworkPaxMailRoute() || latestEngineSet == null || isClosed || isRemoved) {
+			ClearRedesignTransition("inactive");
+			return null;
+		}
+		local target = redesignTransition.rawin("targetVehicles") ? redesignTransition.targetVehicles : null;
+		if(target == null || target <= 0) {
+			ClearRedesignTransition("invalid");
+			return null;
+		}
+		if(redesignTransition.rawin("startDate") && AIDate.GetCurrentDate() > redesignTransition.startDate + 365 * 2) {
+			local pressure = GetRouteWaitingPressure(cargo);
+			if(!pressure.enabled || !pressure.allowed) {
+				ClearRedesignTransition("expired");
+				return null;
+			}
+		}
+		return target;
+	}
+
+	function MaybeClearRedesignTransition() {
+		local target = GetRedesignTransitionTargetVehicles();
+		if(target == null) return;
+		local matching = CountVehiclesMatchingEngineSet(latestEngineSet);
+		if(matching >= target) {
+			if(RetireRedesignTransitionOldVehicles(target)) return;
+		}
+		if(matching >= target && CountMismatchedRedesignVehicles() == 0) {
+			ClearRedesignTransition("target");
+		}
+	}
+
+	function CountMismatchedRedesignVehicles() {
+		if(latestEngineSet == null) return 0;
+		local result = 0;
+		foreach(vehicle, _ in GetVehicleList()) {
+			if(CommonRoute.vehicleRemoving.rawin(vehicle)) continue;
+			if(!HasVehicleEngineSet(vehicle, latestEngineSet)) {
+				result++;
+			}
+		}
+		return result;
+	}
+
+	function RetireRedesignTransitionOldVehicles(minActiveVehicles) {
+		if(latestEngineSet == null) return false;
+		local active = GetActiveTrainVehicleCount();
+		local result = false;
+		foreach(vehicle, _ in GetVehicleList()) {
+			if(active <= minActiveVehicles) break;
+			if(CommonRoute.vehicleRemoving.rawin(vehicle)) continue;
+			if(HasVehicleEngineSet(vehicle, latestEngineSet)) continue;
+			HgLog.Info("TrainRouteRedesignTransition retireOld minActive:"+minActiveVehicles
+					+" active:"+active
+					+" "+this);
+			SendVehicleToDepot(vehicle, true, true);
+			active--;
+			result = true;
+		}
+		return result;
+	}
+
+	function HandleRedesignTransition(engineSet) {
+		local target = GetRedesignTransitionTargetVehicles();
+		if(target == null || engineSet == null) return false;
+		local matching = CountVehiclesMatchingEngineSet(engineSet);
+		if(IsSingle() && matching < target) {
+			if(RetireRedesignTransitionOldVehicles(0)) return true;
+			if(GetNumVehicles() == 0) {
+				HgLog.Info("TrainRouteRedesignTransition buildSingle target:"+target
+						+" matching:"+matching
+						+" "+this);
+				BuildNewTrain();
+				return true;
+			}
+			HgLog.Info("TrainRouteRedesignTransition waitSingleOldSell target:"+target
+					+" matching:"+matching
+					+" vehicles:"+GetNumVehicles()
+					+" "+this);
+			return true;
+		}
+		if(matching < target) {
+			HgLog.Info("TrainRouteRedesignTransition build target:"+target
+					+" matching:"+matching
+					+" "+this);
+			if(BuildNewTrain()) {
+				RetireRedesignTransitionOldVehicles(target);
+				MaybeClearRedesignTransition();
+			}
+			return true;
+		}
+		if(RetireRedesignTransitionOldVehicles(target)) return true;
+		MaybeClearRedesignTransition();
+		return redesignTransition != null;
+	}
+
+	function IsRedesignTransitionBlockingRemoval(vehicle) {
+		local target = GetRedesignTransitionTargetVehicles();
+		if(target == null || updateRailDepot != null || isClosed || isRemoved) return false;
+		local isMatching = latestEngineSet != null && HasVehicleEngineSet(vehicle, latestEngineSet);
+		if(!isMatching && CountVehiclesMatchingEngineSet(latestEngineSet) >= target) {
+			return false;
+		}
+		if(IsSingle() && !isMatching) {
+			return false;
+		}
+		if(GetActiveTrainVehicleCount() <= target) {
+			HgLog.Info("TrainRouteRedesignTransition blockRemoval target:"+target
+					+" active:"+GetActiveTrainVehicleCount()
+					+" "+this);
+			return true;
+		}
+		if(latestEngineSet != null && isMatching
+				&& CountVehiclesMatchingEngineSet(latestEngineSet) <= target) {
+			HgLog.Info("TrainRouteRedesignTransition blockNewRemoval target:"+target
+					+" matching:"+CountVehiclesMatchingEngineSet(latestEngineSet)
+					+" "+this);
+			return true;
+		}
+		return false;
 	}
 
 	function GetRailUsageTiles() {
@@ -939,6 +1135,7 @@ class TrainRoute extends Route {
 	}
 
 	function ChooseEngineSet() {
+		local oldEngineSet = latestEngineSet;
 		local a = GetEngineSets();
 		if(a.len() == 0){ 
 			return null;
@@ -947,6 +1144,9 @@ class TrainRoute extends Route {
 		if(mergedEngineSet != a[0]) {
 			a[0] = mergedEngineSet;
 			saveData.engineSetsCache = engineSetsCache = a;
+		}
+		if(oldEngineSet != null && a[0] != null) {
+			StartRedesignTransition(oldEngineSet, a[0], "engine");
 		}
 		saveData.latestEngineSet = latestEngineSet = a[0];
 		return a[0];
@@ -1332,6 +1532,7 @@ class TrainRoute extends Route {
 		}
 		local oldCapacitySummary = GetCargoCapacitySummary(latestEngineSet);
 		local newCapacitySummary = GetCargoCapacitySummary(newEngineSet);
+		StartRedesignTransition(latestEngineSet, newEngineSet, "capacity");
 		saveData.engineSetsCache = engineSetsCache = sets;
 		saveData.engineSetsDate = engineSetsDate = AIDate.GetCurrentDate();
 		saveData.latestEngineSet = latestEngineSet = newEngineSet;
@@ -1529,6 +1730,7 @@ class TrainRoute extends Route {
 		engineVehicles.rawset(newTrain,latestEngineSet);	
 		saveData.latestEngineVehicle = latestEngineVehicle = newTrain;
 		saveData.oldCargoProduction = oldCargoProduction = GetCargoProductions(); // 列車新造時点での推定値を保存
+		MaybeClearRedesignTransition();
 		/*
 		foreach(cargo in GetCargos()) {
 			if(!oldCargoCapacity.rawin(cargo) && latestEngineSet.cargoCapacity.rawin(cargo)) {
@@ -2678,13 +2880,16 @@ class TrainRoute extends Route {
 		return true;*/
 	}
 	
-	function SendVehicleToDepot(vehicle) {
+	function SendVehicleToDepot(vehicle, ignoreRedesignBlock=false, forceDepot=false) {
 		if(IsUpdatingRail()) {
+			return;
+		}
+		if(!ignoreRedesignBlock && IsRedesignTransitionBlockingRemoval(vehicle)) {
 			return;
 		}
 		CommonRoute.vehicleRemoving.rawset(vehicle,true);
 		if((AIOrder.OF_STOP_IN_DEPOT & AIOrder.GetOrderFlags(vehicle, AIOrder.ORDER_CURRENT)) == 0) {
-			if(AIVehicle.GetAge(vehicle) < 365 && AIVehicle.GetCargoLoad(vehicle, cargo) > 0) {
+			if(!forceDepot && AIVehicle.GetAge(vehicle) < 365 && AIVehicle.GetCargoLoad(vehicle, cargo) > 0) {
 				return;
 			}
 			AIVehicle.SendVehicleToDepot(vehicle);
@@ -2791,10 +2996,24 @@ class TrainRoute extends Route {
 		if(updateRailDepot != null) {
 			SellVehicle(engineVehicle);
 		} else if(isClosed || reduceTrains) {
+			if(!isClosed && IsRedesignTransitionBlockingRemoval(engineVehicle)) {
+				if(CommonRoute.vehicleRemoving.rawin(engineVehicle)) {
+					CommonRoute.vehicleRemoving.rawdelete(engineVehicle);
+				}
+				AIVehicle.StartStopVehicle(engineVehicle);
+				return;
+			}
 			if(isRemoved || latestEngineVehicle != engineVehicle) { //reopenに備えてlatestEngineVehicleだけ残す
 				SellVehicle(engineVehicle);
 			}
 		} else {
+			if(IsRedesignTransitionBlockingRemoval(engineVehicle)) {
+				if(CommonRoute.vehicleRemoving.rawin(engineVehicle)) {
+					CommonRoute.vehicleRemoving.rawdelete(engineVehicle);
+				}
+				AIVehicle.StartStopVehicle(engineVehicle);
+				return;
+			}
 			SellVehicle(engineVehicle);
 		}
 		if(GetNumVehicles()==0) {
@@ -2893,15 +3112,18 @@ class TrainRoute extends Route {
 		
 		local engineSetsCacheOld = engineSetsCache;
 		engineSet = ChooseEngineSet();
+		if(engineSet == null) {
+			HgLog.Warning("No usable engineSet ("+AIRail.GetName(GetRailType())+") "+this);
+			return;
+		}
+		if(HandleRedesignTransition(engineSet)) {
+			return;
+		}
 		if(engineSetsCacheOld == engineSetsCache) {
 			return;
 		}
 		
 //		HgLog.Warning("ChooseEngineSet "+engineSet+" "+this);
-		if(engineSet == null) {
-			HgLog.Warning("No usable engineSet ("+AIRail.GetName(GetRailType())+") "+this);
-			return;
-		}
 		local change = false;
 		foreach(engineVehicle, v in vehicles) {
 			if(!HasVehicleEngineSet(engineVehicle,engineSet) || AIVehicle.GetAgeLeft (engineVehicle) <= 600) {
@@ -2915,10 +3137,14 @@ class TrainRoute extends Route {
 	}
 
 	function CheckCloneTrain() {
-		if(isClosed || isRemoved || updateRailDepot!=null || IsSingle()) {
+		if(isClosed || isRemoved || updateRailDepot!=null) {
 			return;
 		}
-		if(IsVehicleBuyBlocked()) {
+		local transitionTarget = GetRedesignTransitionTargetVehicles();
+		if(IsSingle() && transitionTarget == null) {
+			return;
+		}
+		if(IsVehicleBuyBlocked() && transitionTarget == null) {
 			HgLog.Info(GetVehicleBuyBlockLog());
 			return;
 		}
@@ -2964,6 +3190,16 @@ class TrainRoute extends Route {
 		}
 		
 		local numVehicles = GetNumVehicles();
+		local transitionMissing = 0;
+		if(transitionTarget != null && latestEngineSet != null) {
+			if(HandleRedesignTransition(latestEngineSet)) {
+				return;
+			}
+			if(IsSingle()) {
+				return;
+			}
+			transitionMissing = max(0, transitionTarget - CountVehiclesMatchingEngineSet(latestEngineSet));
+		}
 		// Speed check: if average speed of moving vehicles is below 25% of max speed, the route
 		// is congested — adding more trains would make it worse.
 		if(numVehicles >= 3) {
@@ -2985,7 +3221,9 @@ class TrainRoute extends Route {
 		}
 		if(IsCloneTrain()) {
 			local numClone = 1;
-			if(latestEngineSet != null) {
+			if(transitionMissing > 0) {
+				numClone = min(4, transitionMissing);
+			} else if(latestEngineSet != null) {
 				if(latestEngineSet.vehiclesPerRoute - numVehicles >= 15) {
 					numClone = 6;
 				} else if(latestEngineSet.vehiclesPerRoute - numVehicles >= 9) {
@@ -3006,7 +3244,7 @@ class TrainRoute extends Route {
 				}
 			}
 			local latestVehicle = GetLatestVehicle();
-			if(maxTrains != null) numClone = min(numClone, maxTrains - numVehicles);
+			if(maxTrains != null && transitionMissing <= 0) numClone = min(numClone, maxTrains - numVehicles);
 			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
 				numClone = min(numClone, latestEngineSet.vehiclesPerRoute - numVehicles);
 				if(numClone <= 0) {
@@ -3015,8 +3253,10 @@ class TrainRoute extends Route {
 					return;
 				}
 			}
-			numClone = max(1,min( numClone, waiting / capacity ));
-			if(waitingPressure != null && waitingPressure.enabled) {
+			if(transitionMissing <= 0) {
+				numClone = max(1,min( numClone, waiting / capacity ));
+			}
+			if(waitingPressure != null && waitingPressure.enabled && transitionMissing <= 0) {
 				local state = GetNetworkCapacityState(cargo);
 				state.cargoPressures <- {};
 				foreach(eachCargo in GetCargos()) {
@@ -3041,11 +3281,21 @@ class TrainRoute extends Route {
 					numClone = min(numClone, buyLimit);
 				}
 				HgLog.Info("TrainRouteCloneWaitingDemand cargo:"+AICargo.GetName(cargo)+" "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
+			} else if(transitionMissing > 0) {
+				local buyLimit = GetNetworkCapacityBuyLimit();
+				if(buyLimit != null) {
+					numClone = min(numClone, buyLimit);
+				}
+				HgLog.Info("TrainRouteRedesignTransition clone target:"+transitionTarget
+						+" missing:"+transitionMissing
+						+" numClone:"+numClone
+						+" "+this);
 			}
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
 			for(local i=0; i<numClone; i++) {
 				CloneAndStartTrain(false,latestVehicle);
 			}
+			MaybeClearRedesignTransition();
 			if(destDepot != null && (returnRoute != null || IsBiDirectional())
 					&& latestEngineSet != null && latestEngineSet.vehiclesPerRoute - numVehicles >= 0){
 				local otherStation = returnRoute != null ? returnRoute.srcHgStation : destHgStation;
