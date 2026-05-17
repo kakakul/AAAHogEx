@@ -725,7 +725,18 @@ class Route {
 		local vehicleType = GetVehicleType();
 		return vehicleType == AIVehicle.VT_ROAD
 				|| vehicleType == AIVehicle.VT_RAIL
-				|| vehicleType == AIVehicle.VT_AIR;
+				|| vehicleType == AIVehicle.VT_AIR
+				|| vehicleType == AIVehicle.VT_WATER;
+	}
+
+	function GetNetworkCapacityBuyLimit() {
+		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return null;
+		local vehicleType = GetVehicleType();
+		if(vehicleType == AIVehicle.VT_ROAD) return 6;
+		if(vehicleType == AIVehicle.VT_RAIL) return 2;
+		if(vehicleType == AIVehicle.VT_WATER) return 2;
+		if(vehicleType == AIVehicle.VT_AIR) return 1;
+		return null;
 	}
 
 	function GetRouteWaitingPressure(cargo) {
@@ -850,6 +861,10 @@ class Route {
 
 	function GetCapacityLimitVehicles() {
 		return GetMaxVehicles();
+	}
+
+	function HasSufficientWaitingPressureForLoadCheck(state) {
+		return state != null && state.pressure >= 200;
 	}
 
 	function GetNetworkCapacityState(cargo, speedPct = null) {
@@ -2244,7 +2259,10 @@ class CommonRoute extends Route {
 					if(HogeAI.Get().IsNetworkMode()) {
 						local state = route.GetNetworkCapacityState(route.cargo);
 						state.reduceBuffer = route.GetCapacityBuffer(state, true);
-						if(state.currentVehicles > state.targetVehicles + state.reduceBuffer) {
+						if(route.HasSufficientWaitingPressureForLoadCheck(state)) {
+							route.ClearReduceStrike("low_avg_load");
+							HgLog.Info(route.GetCapacityDecisionLog("low_avg_load", "skip_pressure", state, null, detail));
+						} else if(state.currentVehicles > state.targetVehicles + state.reduceBuffer) {
 							local strike = route.CheckCapacityStrike("low_avg_load", detail, state);
 							if(strike.pending) {
 								continue;
@@ -2272,7 +2290,9 @@ class CommonRoute extends Route {
 				local routeProfit = averageProfit;
 				if(tooManyVehicles) routeProfit /= vehicleList.Count();
 				if(reduceForMaintenance) routeProfit = routeProfit * 1000 / infraCost;
-				minRoutes.AddItem(index, routeProfit);
+				if(routeProfit <= 0) {
+					minRoutes.AddItem(index, routeProfit);
+				}
 			}
 		}
 
@@ -2326,7 +2346,10 @@ class CommonRoute extends Route {
 			if(HogeAI.Get().IsNetworkMode()) {
 				local state = GetNetworkCapacityState(cargo);
 				state.reduceBuffer = GetCapacityBuffer(state, true);
-				if(state.currentVehicles > state.targetVehicles + state.reduceBuffer) {
+				if(HasSufficientWaitingPressureForLoadCheck(state)) {
+					ClearReduceStrike("support_low_avg_load");
+					HgLog.Info(GetCapacityDecisionLog("support_low_avg_load", "skip_pressure", state, null, detail));
+				} else if(state.currentVehicles > state.targetVehicles + state.reduceBuffer) {
 					local strike = CheckCapacityStrike("support_low_avg_load", detail, state);
 					if(strike.pending) {
 						return;
@@ -3190,6 +3213,9 @@ class CommonRoute extends Route {
 				}
 			}
 		} else if(vehicleType == AIVehicle.VT_ROAD && latestEngineSet!=null) {
+			if(HogeAI.Get().IsNetworkMode()) {
+				return;
+			}
 			local townTransfer = IsTownTransferRoute();
 			local currentVehicles = vehicleList.Count();
 			local minNum = (tooMany || townTransfer ? 1 : 2);
@@ -3625,6 +3651,10 @@ class CommonRoute extends Route {
 						buildNum = min(buildNum, max(1, waitingPressure.requiredVehicles - vehicleList.Count()));
 					}
 					buildNum = min(maxVehicles - vehicles.Count(), buildNum) - firstBuild;
+					local buyLimit = GetNetworkCapacityBuyLimit();
+					if(buyLimit != null) {
+						buildNum = min(buildNum, buyLimit);
+					}
 					//if(HogeAI().Get().roiBase) {
 					//	buildNum = min(buildNum, max(1, (maxVehicles - vehicles.Count())/8));
 					//}

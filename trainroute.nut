@@ -2764,6 +2764,10 @@ class TrainRoute extends Route {
 				capacity = GetCargoCapacity(cargo);
 				if(capacity <= 0) return;
 				numClone = min(numClone, max(1, waitingPressure.requiredVehicles - numVehicles));
+				local buyLimit = GetNetworkCapacityBuyLimit();
+				if(buyLimit != null) {
+					numClone = min(numClone, buyLimit);
+				}
 				HgLog.Info("TrainRouteCloneWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
 			}
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
