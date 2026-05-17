@@ -943,13 +943,10 @@ class TrainRoute extends Route {
 		if(a.len() == 0){ 
 			return null;
 		}
-		if(IsRejectedNetworkPaxMailCapacityOnlyEngineSet(a[0])) {
-			HgLog.Info("TrainRouteCapacityRedesign rejected normal capacity-only reduction oldCap:"
-					+(latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0)
-					+" newCap:"+(a[0].cargoCapacity.rawin(cargo) ? a[0].cargoCapacity.rawget(cargo) : 0)
-					+" "+this);
-			saveData.engineSetsCache = engineSetsCache = [latestEngineSet];
-			return latestEngineSet;
+		local mergedEngineSet = GetNetworkPaxMailMergedEngineSet(a[0], true);
+		if(mergedEngineSet != a[0]) {
+			a[0] = mergedEngineSet;
+			saveData.engineSetsCache = engineSetsCache = a;
 		}
 		saveData.latestEngineSet = latestEngineSet = a[0];
 		return a[0];
@@ -958,11 +955,207 @@ class TrainRoute extends Route {
 	function IsRejectedNetworkPaxMailCapacityOnlyEngineSet(newEngineSet) {
 		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return false;
 		if(latestEngineSet == null || newEngineSet == null) return false;
-		if(newEngineSet.trainEngine != latestEngineSet.trainEngine) return false;
-		if(newEngineSet.railType != latestEngineSet.railType) return false;
-		local oldPrimaryCapacity = latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0;
-		local newPrimaryCapacity = newEngineSet.cargoCapacity.rawin(cargo) ? newEngineSet.cargoCapacity.rawget(cargo) : 0;
-		return oldPrimaryCapacity > 0 && newPrimaryCapacity < oldPrimaryCapacity;
+		if(IsAllowedNetworkPaxMailNewCargoEngineSet(newEngineSet)) return false;
+		return HasNetworkPaxMailCargoCapacityDecrease(newEngineSet, false);
+	}
+
+	function GetEngineSetCargoCapacity(engineSet, targetCargo) {
+		if(engineSet == null) return 0;
+		return engineSet.cargoCapacity.rawin(targetCargo) ? engineSet.cargoCapacity.rawget(targetCargo) : 0;
+	}
+
+	function GetCargoCapacitySummary(engineSet) {
+		if(engineSet == null) return "null";
+		local result = [];
+		foreach(eachCargo, capacity in engineSet.cargoCapacity) {
+			result.push(AICargo.GetName(eachCargo)+":"+capacity);
+		}
+		return HgArray(result);
+	}
+
+	function IsSameEngineSetCargoCapacity(a, b) {
+		if(a == null || b == null) return a == b;
+		foreach(eachCargo, capacity in a.cargoCapacity) {
+			if(GetEngineSetCargoCapacity(b, eachCargo) != capacity) return false;
+		}
+		foreach(eachCargo, capacity in b.cargoCapacity) {
+			if(GetEngineSetCargoCapacity(a, eachCargo) != capacity) return false;
+		}
+		return true;
+	}
+
+	function HasNetworkPaxMailNewCargo(newEngineSet) {
+		if(latestEngineSet == null || newEngineSet == null) return false;
+		foreach(eachCargo, capacity in newEngineSet.cargoCapacity) {
+			if(capacity > 0 && !latestEngineSet.cargoCapacity.rawin(eachCargo)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function HasNetworkPaxMailCargoCapacityDecrease(newEngineSet, allowOnePrimaryWagonForNewCargo) {
+		if(latestEngineSet == null || newEngineSet == null) return false;
+		local allowedPrimaryWagonSacrifice = false;
+		if(allowOnePrimaryWagonForNewCargo && HasNetworkPaxMailNewCargo(newEngineSet)) {
+			local oldPrimaryWagons = GetWagonCountForCargo(latestEngineSet, cargo);
+			local newPrimaryWagons = GetWagonCountForCargo(newEngineSet, cargo);
+			local platformLength = GetPlatformLength();
+			allowedPrimaryWagonSacrifice = oldPrimaryWagons > 0
+					&& oldPrimaryWagons - newPrimaryWagons >= 0
+					&& oldPrimaryWagons - newPrimaryWagons <= 1
+					&& latestEngineSet.length / 16 >= platformLength - 1;
+		}
+		foreach(eachCargo, oldCapacity in latestEngineSet.cargoCapacity) {
+			local newCapacity = GetEngineSetCargoCapacity(newEngineSet, eachCargo);
+			if(newCapacity < oldCapacity) {
+				if(allowedPrimaryWagonSacrifice && eachCargo == cargo) {
+					continue;
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function IsAllowedNetworkPaxMailNewCargoEngineSet(newEngineSet) {
+		if(!HasNetworkPaxMailNewCargo(newEngineSet)) return false;
+		return !HasNetworkPaxMailCargoCapacityDecrease(newEngineSet, true);
+	}
+
+	function GetWagonInfoByCargo(engineSet, targetCargo) {
+		if(engineSet == null) return null;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			if(wagonEngineInfo.cargo == targetCargo) {
+				return wagonEngineInfo;
+			}
+		}
+		return null;
+	}
+
+	function GetEngineSetWagonLength(engineSet) {
+		local result = 0;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			result += wagonEngineInfo.lengthWeight[0] * wagonEngineInfo.numWagon;
+		}
+		return result;
+	}
+
+	function GetEngineSetWagonWeight(engineSet) {
+		local result = 0;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			result += wagonEngineInfo.lengthWeight[1] * wagonEngineInfo.numWagon;
+		}
+		return result;
+	}
+
+	function GetEngineSetWagonPrice(engineSet) {
+		local result = 0;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			result += wagonEngineInfo.price * wagonEngineInfo.numWagon;
+		}
+		return result;
+	}
+
+	function GetEngineSetWagonRunningCost(engineSet) {
+		local result = 0;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			result += wagonEngineInfo.runningCost * wagonEngineInfo.numWagon;
+		}
+		return result;
+	}
+
+	function GetNetworkPaxMailMergedEngineSet(proposedEngineSet, allowNewCargoPassengerSwap) {
+		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return proposedEngineSet;
+		if(latestEngineSet == null || proposedEngineSet == null) return proposedEngineSet;
+		local wagonInfos = [];
+		local seenCargos = {};
+		foreach(wagonEngineInfo in proposedEngineSet.wagonEngineInfos) {
+			local oldCount = GetWagonCountForCargo(latestEngineSet, wagonEngineInfo.cargo);
+			local newCount = max(oldCount, wagonEngineInfo.numWagon);
+			local merged = clone wagonEngineInfo;
+			merged.numWagon = newCount;
+			wagonInfos.push(merged);
+			seenCargos.rawset(wagonEngineInfo.cargo, true);
+		}
+		foreach(wagonEngineInfo in latestEngineSet.wagonEngineInfos) {
+			if(seenCargos.rawin(wagonEngineInfo.cargo)) continue;
+			if(!AIEngine.CanRunOnRail(wagonEngineInfo.engine, proposedEngineSet.railType)
+					|| TrainRoute.IsUnsuitableEngineWagon(proposedEngineSet.trainEngine, wagonEngineInfo.engine)) {
+				HgLog.Info("TrainRouteCapacityMerge blocked cargo:"+AICargo.GetName(wagonEngineInfo.cargo)
+						+" oldWagon:"+AIEngine.GetName(wagonEngineInfo.engine)
+						+" newEngine:"+AIEngine.GetName(proposedEngineSet.trainEngine)
+						+" "+this);
+				return latestEngineSet;
+			}
+			local merged = clone wagonEngineInfo;
+			wagonInfos.push(merged);
+			seenCargos.rawset(wagonEngineInfo.cargo, true);
+		}
+		local mergedEngineSet = RebuildMergedEngineSet(proposedEngineSet, wagonInfos);
+		local maxLength = GetPlatformLength() * 16;
+		if(mergedEngineSet.length > maxLength && allowNewCargoPassengerSwap && HasNetworkPaxMailNewCargo(proposedEngineSet)) {
+			foreach(wagonEngineInfo in wagonInfos) {
+				if(wagonEngineInfo.cargo == cargo && wagonEngineInfo.numWagon > 0) {
+					wagonEngineInfo.numWagon --;
+					break;
+				}
+			}
+			mergedEngineSet = RebuildMergedEngineSet(proposedEngineSet, wagonInfos);
+		}
+		if(mergedEngineSet.length > maxLength) {
+			HgLog.Info("TrainRouteCapacityMerge blocked tooLong length:"+mergedEngineSet.length
+					+" max:"+maxLength
+					+" oldCap:"+GetCargoCapacitySummary(latestEngineSet)
+					+" proposedCap:"+GetCargoCapacitySummary(proposedEngineSet)
+					+" "+this);
+			return latestEngineSet;
+		}
+		if(!IsSameEngineSetCargoCapacity(mergedEngineSet, proposedEngineSet)
+				|| proposedEngineSet.trainEngine != latestEngineSet.trainEngine) {
+			HgLog.Info("TrainRouteCapacityMerge oldCap:"+GetCargoCapacitySummary(latestEngineSet)
+					+" proposedCap:"+GetCargoCapacitySummary(proposedEngineSet)
+					+" mergedCap:"+GetCargoCapacitySummary(mergedEngineSet)
+					+" engine:"+AIEngine.GetName(proposedEngineSet.trainEngine)
+					+" "+this);
+		}
+		return mergedEngineSet;
+	}
+
+	function RebuildMergedEngineSet(proposedEngineSet, wagonInfos) {
+		local mergedEngineSet = clone proposedEngineSet;
+		mergedEngineSet.wagonEngineInfos = [];
+		local cargoCapacity = {};
+		local totalCapacity = 0;
+		local wagonLength = 0;
+		local wagonWeight = 0;
+		local wagonPrice = 0;
+		local wagonRunningCost = 0;
+		foreach(wagonEngineInfo in wagonInfos) {
+			if(wagonEngineInfo.numWagon <= 0) continue;
+			local merged = clone wagonEngineInfo;
+			mergedEngineSet.wagonEngineInfos.push(merged);
+			local capacity = merged.capacity * merged.numWagon;
+			local oldCapacity = cargoCapacity.rawin(merged.cargo) ? cargoCapacity.rawget(merged.cargo) : 0;
+			cargoCapacity.rawset(merged.cargo, oldCapacity + capacity);
+			totalCapacity += capacity;
+			wagonLength += merged.lengthWeight[0] * merged.numWagon;
+			wagonWeight += merged.lengthWeight[1] * merged.numWagon;
+			wagonPrice += merged.price * merged.numWagon;
+			wagonRunningCost += merged.runningCost * merged.numWagon;
+		}
+		local baseLength = proposedEngineSet.length - GetEngineSetWagonLength(proposedEngineSet);
+		local baseWeight = proposedEngineSet.weight - GetEngineSetWagonWeight(proposedEngineSet);
+		local basePrice = proposedEngineSet.price - GetEngineSetWagonPrice(proposedEngineSet);
+		local baseRunningCost = proposedEngineSet.runningCost - GetEngineSetWagonRunningCost(proposedEngineSet);
+		mergedEngineSet.cargoCapacity = cargoCapacity;
+		mergedEngineSet.capacity = cargoCapacity.rawin(cargo) ? cargoCapacity.rawget(cargo) : 0;
+		mergedEngineSet.totalCapacity = totalCapacity;
+		mergedEngineSet.length = baseLength + wagonLength;
+		mergedEngineSet.weight = baseWeight + wagonWeight;
+		mergedEngineSet.price = basePrice + wagonPrice;
+		mergedEngineSet.runningCost = baseRunningCost + wagonRunningCost;
+		return mergedEngineSet;
 	}
 	
 	function GetEngineSets(isAll=false, additionalDistance=null, cargoProductionOverride=null) {
@@ -1074,13 +1267,13 @@ class TrainRoute extends Route {
 
 	function GetCapacityRedesignProduction(strike) {
 		local result = {};
-		local mainPressure = strike.avgCargoPressures.rawin(cargo) ? strike.avgCargoPressures.rawget(cargo) : strike.avgTargetVehicles * GetCargoCapacity(cargo);
-		result.rawset(cargo, max(50, mainPressure));
 		foreach(eachCargo in GetCargos()) {
-			if(eachCargo == cargo) continue;
 			local pressure = strike.avgCargoPressures.rawin(eachCargo) ? strike.avgCargoPressures.rawget(eachCargo) : 0;
-			if(pressure > 0) {
-				result.rawset(eachCargo, pressure);
+			if(eachCargo == cargo) {
+				pressure = max(pressure, strike.avgTargetVehicles * GetCargoCapacity(eachCargo));
+			}
+			if(pressure > 0 || eachCargo == cargo) {
+				result.rawset(eachCargo, max(50, pressure));
 			}
 		}
 		return result;
@@ -1096,38 +1289,55 @@ class TrainRoute extends Route {
 		if(capacityRedesignDate != null && AIDate.GetCurrentDate() < capacityRedesignDate + redesignInterval) {
 			return false;
 		}
-		local oldPrimaryCapacity = latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0;
+		local oldPrimaryCapacity = GetEngineSetCargoCapacity(latestEngineSet, cargo);
 		if(oldPrimaryCapacity <= 0) return false;
 		local cargoProduction = GetCapacityRedesignProduction(strike);
 		local sets = GetEngineSets(false, null, cargoProduction);
 		if(sets.len() == 0) return false;
-		local newEngineSet = sets[0];
-		local newPrimaryCapacity = newEngineSet.cargoCapacity.rawin(cargo) ? newEngineSet.cargoCapacity.rawget(cargo) : 0;
-		local avgPrimaryPressure = strike.avgCargoPressures.rawin(cargo) ? strike.avgCargoPressures.rawget(cargo) : strike.avgTargetVehicles * oldPrimaryCapacity;
-		local oldRequired = oldPrimaryCapacity > 0 ? (avgPrimaryPressure + oldPrimaryCapacity - 1) / oldPrimaryCapacity : 10000;
-		local newRequired = newPrimaryCapacity > 0 ? (avgPrimaryPressure + newPrimaryCapacity - 1) / newPrimaryCapacity : 10000;
-		local oldPrimaryWagons = GetWagonCountForCargo(latestEngineSet, cargo);
-		local newPrimaryWagons = GetWagonCountForCargo(newEngineSet, cargo);
-		local significant = newPrimaryCapacity >= oldPrimaryCapacity * 3 / 2
-				|| oldRequired - newRequired >= 2
-				|| newPrimaryWagons - oldPrimaryWagons >= 2;
-		HgLog.Info("TrainRouteCapacityRedesign oldCap:"+oldPrimaryCapacity
-				+" newCap:"+newPrimaryCapacity
-				+" oldReq:"+oldRequired
-				+" newReq:"+newRequired
-				+" oldWagons:"+oldPrimaryWagons
-				+" newWagons:"+newPrimaryWagons
+		local newEngineSet = GetNetworkPaxMailMergedEngineSet(sets[0], false);
+		sets[0] = newEngineSet;
+		local significant = false;
+		local details = [];
+		foreach(eachCargo, pressure in strike.avgCargoPressures) {
+			local oldCapacity = GetEngineSetCargoCapacity(latestEngineSet, eachCargo);
+			local newCapacity = GetEngineSetCargoCapacity(newEngineSet, eachCargo);
+			if(oldCapacity <= 0 && newCapacity <= 0) continue;
+			local oldRequired = oldCapacity > 0 ? (pressure + oldCapacity - 1) / oldCapacity : 10000;
+			local newRequired = newCapacity > 0 ? (pressure + newCapacity - 1) / newCapacity : 10000;
+			local oldWagons = GetWagonCountForCargo(latestEngineSet, eachCargo);
+			local newWagons = GetWagonCountForCargo(newEngineSet, eachCargo);
+			local cargoSignificant = newCapacity > oldCapacity
+					&& (newCapacity >= oldCapacity * 3 / 2
+						|| oldRequired - newRequired >= 2
+						|| newWagons - oldWagons >= 2);
+			if(cargoSignificant) {
+				significant = true;
+			}
+			details.push(AICargo.GetName(eachCargo)
+					+":oldCap="+oldCapacity
+					+" newCap="+newCapacity
+					+" pressure="+pressure
+					+" oldReq="+oldRequired
+					+" newReq="+newRequired
+					+" oldWagons="+oldWagons
+					+" newWagons="+newWagons);
+		}
+		HgLog.Info("TrainRouteCapacityRedesign oldCap:"+GetCargoCapacitySummary(latestEngineSet)
+				+" newCap:"+GetCargoCapacitySummary(newEngineSet)
+				+" details:"+HgArray(details)
 				+" significant:"+significant
 				+" "+this);
-		if(!significant || newPrimaryCapacity <= oldPrimaryCapacity) {
+		if(!significant) {
 			return false;
 		}
+		local oldCapacitySummary = GetCargoCapacitySummary(latestEngineSet);
+		local newCapacitySummary = GetCargoCapacitySummary(newEngineSet);
 		saveData.engineSetsCache = engineSetsCache = sets;
 		saveData.engineSetsDate = engineSetsDate = AIDate.GetCurrentDate();
 		saveData.latestEngineSet = latestEngineSet = newEngineSet;
 		saveData.capacityRedesignDate = capacityRedesignDate = AIDate.GetCurrentDate();
-		HgLog.Warning("TrainRouteCapacityRedesign applied oldCap:"+oldPrimaryCapacity
-				+" newCap:"+newPrimaryCapacity
+		HgLog.Warning("TrainRouteCapacityRedesign applied oldCap:"+oldCapacitySummary
+				+" newCap:"+newCapacitySummary
 				+" "+this);
 		return true;
 	}
@@ -1142,23 +1352,35 @@ class TrainRoute extends Route {
 		if(capacityRedesignDate != null && AIDate.GetCurrentDate() < capacityRedesignDate + redesignInterval) {
 			return false;
 		}
-		local pressure = GetRouteWaitingPressure(cargo);
-		if(!pressure.enabled || !pressure.allowed) {
+		local state = null;
+		local bestCargo = null;
+		local bestGap = -10000;
+		local cargoPressures = {};
+		foreach(eachCargo in GetCargos()) {
+			local cargoPressure = GetRouteWaitingPressure(eachCargo);
+			cargoPressures.rawset(eachCargo, cargoPressure.pressure);
+			if(!IsNetworkPaxMailWaitingCapacityMode(eachCargo) || !cargoPressure.enabled || !cargoPressure.allowed) {
+				continue;
+			}
+			local cargoState = GetNetworkCapacityState(eachCargo);
+			local gap = cargoState.targetVehicles - cargoState.currentVehicles;
+			if(bestCargo == null || gap > bestGap || (gap == bestGap && cargoPressure.pressure > cargoPressures.rawget(bestCargo))) {
+				state = cargoState;
+				bestCargo = eachCargo;
+				bestGap = gap;
+			}
+		}
+		if(state == null) {
 			ClearReduceStrike("train_consist_redesign");
 			return false;
 		}
-		local state = GetNetworkCapacityState(cargo);
-		state.cargoPressures <- {};
-		foreach(eachCargo in GetCargos()) {
-			local cargoPressure = GetRouteWaitingPressure(eachCargo);
-			state.cargoPressures.rawset(eachCargo, cargoPressure.pressure);
-		}
-		local strike = CheckCapacityStrike("train_consist_redesign", "target:"+state.targetVehicles+" current:"+state.currentVehicles, state);
+		state.cargoPressures <- cargoPressures;
+		local strike = CheckCapacityStrike("train_consist_redesign", "cargo:"+AICargo.GetName(bestCargo)+" target:"+state.targetVehicles+" current:"+state.currentVehicles, state);
 		if(strike.pending) {
 			return false;
 		}
 		if(!strike.allowed) {
-			HgLog.Info("TrainRouteCapacityRedesign hold "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
+			HgLog.Info("TrainRouteCapacityRedesign hold cargo:"+AICargo.GetName(bestCargo)+" "+GetRouteWaitingPressureLog(bestCargo)+" strike:"+strike.count+" "+this);
 			return false;
 		}
 		return MaybeRedesignCapacityForClone(strike);
@@ -2345,7 +2567,7 @@ class TrainRoute extends Route {
 			if(IsNetworkPaxMailWaitingCapacityMode(cargo)) {
 				local pressure = GetRouteWaitingPressure(cargo);
 				if(pressure.allowed) {
-					HgLog.Info("TrainRouteWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" "+this);
+					HgLog.Info("TrainRouteWaitingDemand cargo:"+AICargo.GetName(cargo)+" "+GetRouteWaitingPressureLog(cargo)+" "+this);
 					return true;
 				}
 				continue;
@@ -2806,7 +3028,7 @@ class TrainRoute extends Route {
 					return;
 				}
 				if(!strike.allowed) {
-					HgLog.Info("TrainRouteCloneWaitingDemand hold "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
+					HgLog.Info("TrainRouteCloneWaitingDemand hold cargo:"+AICargo.GetName(cargo)+" "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
 					return;
 				}
 				latestVehicle = GetLatestVehicle();
@@ -2818,7 +3040,7 @@ class TrainRoute extends Route {
 				if(buyLimit != null) {
 					numClone = min(numClone, buyLimit);
 				}
-				HgLog.Info("TrainRouteCloneWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
+				HgLog.Info("TrainRouteCloneWaitingDemand cargo:"+AICargo.GetName(cargo)+" "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
 			}
 			numClone = min(numClone, GetMaxTotalVehicles() - AIGroup.GetNumVehicles( AIGroup.GROUP_ALL, AIVehicle.VT_RAIL));
 			for(local i=0; i<numClone; i++) {
