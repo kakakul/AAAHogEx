@@ -943,8 +943,26 @@ class TrainRoute extends Route {
 		if(a.len() == 0){ 
 			return null;
 		}
+		if(IsRejectedNetworkPaxMailCapacityOnlyEngineSet(a[0])) {
+			HgLog.Info("TrainRouteCapacityRedesign rejected normal capacity-only reduction oldCap:"
+					+(latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0)
+					+" newCap:"+(a[0].cargoCapacity.rawin(cargo) ? a[0].cargoCapacity.rawget(cargo) : 0)
+					+" "+this);
+			saveData.engineSetsCache = engineSetsCache = [latestEngineSet];
+			return latestEngineSet;
+		}
 		saveData.latestEngineSet = latestEngineSet = a[0];
 		return a[0];
+	}
+
+	function IsRejectedNetworkPaxMailCapacityOnlyEngineSet(newEngineSet) {
+		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return false;
+		if(latestEngineSet == null || newEngineSet == null) return false;
+		if(newEngineSet.trainEngine != latestEngineSet.trainEngine) return false;
+		if(newEngineSet.railType != latestEngineSet.railType) return false;
+		local oldPrimaryCapacity = latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0;
+		local newPrimaryCapacity = newEngineSet.cargoCapacity.rawin(cargo) ? newEngineSet.cargoCapacity.rawget(cargo) : 0;
+		return oldPrimaryCapacity > 0 && newPrimaryCapacity < oldPrimaryCapacity;
 	}
 	
 	function GetEngineSets(isAll=false, additionalDistance=null, cargoProductionOverride=null) {
@@ -1112,6 +1130,38 @@ class TrainRoute extends Route {
 				+" newCap:"+newPrimaryCapacity
 				+" "+this);
 		return true;
+	}
+
+	function CheckTrainConsistRedesign() {
+		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return false;
+		if(latestEngineSet == null) return false;
+		local redesignInterval = 365 * 3;
+		if(startDate == null || AIDate.GetCurrentDate() < startDate + redesignInterval) {
+			return false;
+		}
+		if(capacityRedesignDate != null && AIDate.GetCurrentDate() < capacityRedesignDate + redesignInterval) {
+			return false;
+		}
+		local pressure = GetRouteWaitingPressure(cargo);
+		if(!pressure.enabled || !pressure.allowed) {
+			ClearReduceStrike("train_consist_redesign");
+			return false;
+		}
+		local state = GetNetworkCapacityState(cargo);
+		state.cargoPressures <- {};
+		foreach(eachCargo in GetCargos()) {
+			local cargoPressure = GetRouteWaitingPressure(eachCargo);
+			state.cargoPressures.rawset(eachCargo, cargoPressure.pressure);
+		}
+		local strike = CheckCapacityStrike("train_consist_redesign", "target:"+state.targetVehicles+" current:"+state.currentVehicles, state);
+		if(strike.pending) {
+			return false;
+		}
+		if(!strike.allowed) {
+			HgLog.Info("TrainRouteCapacityRedesign hold "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
+			return false;
+		}
+		return MaybeRedesignCapacityForClone(strike);
 	}
 	
 	function ChooseEngineSetAllRailTypes() {
@@ -2564,6 +2614,7 @@ class TrainRoute extends Route {
 			}
 		}
 		
+		CheckTrainConsistRedesign();
 		
 		if(!IsBuilding() && lastChangeDestDate != null && lastChangeDestDate + 120 < AIDate.GetCurrentDate() && !IsChangeDestination()) {
 			local removedStations = [];
@@ -2758,7 +2809,6 @@ class TrainRoute extends Route {
 					HgLog.Info("TrainRouteCloneWaitingDemand hold "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
 					return;
 				}
-				MaybeRedesignCapacityForClone(strike);
 				latestVehicle = GetLatestVehicle();
 				latestEngineSet = GetLatestEngineSet();
 				capacity = GetCargoCapacity(cargo);
