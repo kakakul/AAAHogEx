@@ -421,7 +421,7 @@ class PaxMailNetwork {
 	}
 
 	function PaxMailNetwork::GetHubTowns(allTowns) {
-		local hubCount = max(3, (allTowns.len() + 2) / 3);
+		local hubCount = max(3, (allTowns.len() + 2) / 5);
 		hubCount = min(hubCount, allTowns.len());
 		local hubs = [];
 		for(local i = 0; i < hubCount; i++) {
@@ -527,7 +527,7 @@ class PaxMailNetwork {
 			local bestDist = null;
 			foreach(hub in hubs) {
 				local dist = AIMap.DistanceManhattan(AITown.GetLocation(hub), AITown.GetLocation(town));
-				if(dist > 50 || dist <= 0) continue;
+				if(dist > 80 || dist <= 0) continue;
 				if(bestHub == null
 						|| dist < bestDist
 						|| (dist == bestDist && AITown.GetPopulation(hub) > AITown.GetPopulation(bestHub))) {
