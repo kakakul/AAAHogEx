@@ -734,7 +734,7 @@ class Route {
 		local vehicleType = GetVehicleType();
 		if(vehicleType == AIVehicle.VT_ROAD) return 6;
 		if(vehicleType == AIVehicle.VT_RAIL) return 2;
-		if(vehicleType == AIVehicle.VT_WATER) return 2;
+		if(vehicleType == AIVehicle.VT_WATER) return 4;
 		if(vehicleType == AIVehicle.VT_AIR) return 1;
 		return null;
 	}
