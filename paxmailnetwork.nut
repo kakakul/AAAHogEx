@@ -820,8 +820,13 @@ class PaxMailNetwork {
 						}
 					}
 				} else {
-					PaxMailNetwork.AddPairBlacklist(candidate, "BuildFailed");
-					HgLog.Info("PaxMailNetwork.BuildFailed id:"+candidate.routeTraceId+" "+candidate.explain);
+					local failureReason = builder.GetFailureReason();
+					if(failureReason == "tooShortMoney") {
+						HgLog.Info("PaxMailNetwork.BuildRetryLater id:"+candidate.routeTraceId+" reason:"+failureReason+" "+candidate.explain);
+					} else {
+						PaxMailNetwork.AddPairBlacklist(candidate, "BuildFailed");
+						HgLog.Info("PaxMailNetwork.BuildFailed id:"+candidate.routeTraceId+" "+candidate.explain);
+					}
 				}
 			} else {
 				PaxMailNetwork.AddPairBlacklist(candidate, "BuildSkipped");

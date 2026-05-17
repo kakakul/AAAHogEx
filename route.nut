@@ -848,6 +848,10 @@ class Route {
 		return isReduce ? 1 : 0;
 	}
 
+	function GetCapacityLimitVehicles() {
+		return GetMaxVehicles();
+	}
+
 	function GetNetworkCapacityState(cargo, speedPct = null) {
 		local vehicleList = GetVehicleList();
 		vehicleList.Valuate(AIVehicle.IsStoppedInDepot);
@@ -869,7 +873,7 @@ class Route {
 			vehicleType = GetVehicleType(),
 			support = IsSupport(),
 			currentVehicles = currentVehicles,
-			maxVehicles = maxVehicles,
+			maxVehicles = GetCapacityLimitVehicles(),
 			targetVehicles = targetVehicles,
 			buyBuffer = 0,
 			reduceBuffer = 0,
@@ -1009,7 +1013,8 @@ class Route {
 			avgTargetVehicles = state != null ? state.targetVehicles : 0,
 			avgCurrentVehicles = state != null ? state.currentVehicles : 0,
 			avgLoadPct = state != null ? state.avgLoadPct : 0,
-			avgSpeedPct = state != null ? state.avgSpeedPct : 0
+			avgSpeedPct = state != null ? state.avgSpeedPct : 0,
+			avgCargoPressures = {}
 		};
 		if(!HogeAI.Get().IsNetworkMode()) {
 			result.allowed = true;
@@ -1029,8 +1034,14 @@ class Route {
 				targetVehiclesSum = state != null ? state.targetVehicles : 0,
 				currentVehiclesSum = state != null ? state.currentVehicles : 0,
 				loadPctSum = state != null ? state.avgLoadPct : 0,
-				speedPctSum = state != null ? state.avgSpeedPct : 0
+				speedPctSum = state != null ? state.avgSpeedPct : 0,
+				cargoPressureSums = {}
 			};
+			if(state != null && state.rawin("cargoPressures")) {
+				foreach(cargo, pressure in state.cargoPressures) {
+					strike.cargoPressureSums.rawset(cargo, pressure);
+				}
+			}
 			reduceStrikes.rawset(reason, strike);
 			result.advanced = true;
 		} else if(strike.lastDate + 60 <= currentDate) {
@@ -1044,11 +1055,18 @@ class Route {
 			if(!strike.rawin("currentVehiclesSum")) strike.currentVehiclesSum <- (state != null ? state.currentVehicles : 0) * strike.samples;
 			if(!strike.rawin("loadPctSum")) strike.loadPctSum <- (state != null ? state.avgLoadPct : 0) * strike.samples;
 			if(!strike.rawin("speedPctSum")) strike.speedPctSum <- (state != null ? state.avgSpeedPct : 0) * strike.samples;
+			if(!strike.rawin("cargoPressureSums")) strike.cargoPressureSums <- {};
 			strike.samples ++;
 			strike.targetVehiclesSum += state != null ? state.targetVehicles : 0;
 			strike.currentVehiclesSum += state != null ? state.currentVehicles : 0;
 			strike.loadPctSum += state != null ? state.avgLoadPct : 0;
 			strike.speedPctSum += state != null ? state.avgSpeedPct : 0;
+			if(state != null && state.rawin("cargoPressures")) {
+				foreach(cargo, pressure in state.cargoPressures) {
+					local sum = strike.cargoPressureSums.rawin(cargo) ? strike.cargoPressureSums.rawget(cargo) : 0;
+					strike.cargoPressureSums.rawset(cargo, sum + pressure);
+				}
+			}
 		} else {
 			result.pending = true;
 			result.nextDate = strike.lastDate + 60;
@@ -1060,6 +1078,11 @@ class Route {
 		result.avgCurrentVehicles = GetCapacityStrikeAverage(strike, "currentVehiclesSum", result.avgCurrentVehicles);
 		result.avgLoadPct = GetCapacityStrikeAverage(strike, "loadPctSum", result.avgLoadPct);
 		result.avgSpeedPct = GetCapacityStrikeAverage(strike, "speedPctSum", result.avgSpeedPct);
+		if(strike.rawin("cargoPressureSums") && strike.rawin("samples") && strike.samples > 0) {
+			foreach(cargo, pressureSum in strike.cargoPressureSums) {
+				result.avgCargoPressures.rawset(cargo, (pressureSum + strike.samples / 2) / strike.samples);
+			}
+		}
 		if(result.advanced) {
 			HgLog.Warning("RouteCapacityStrike reason:"+reason
 					+" count:"+strike.count
@@ -2362,6 +2385,10 @@ class CommonRoute extends Route {
 			}
 		}
 	}
+
+	function GetCapacityLimitVehicles() {
+		return maxVehicles;
+	}
 	
 	function ReduceVehiclesToHalf() {
 		local vehicleList = AIVehicleList_Group(this.vehicleGroup);
@@ -2854,10 +2881,6 @@ class CommonRoute extends Route {
 		local result = null;
 		local cost = AIEngine.GetPrice(AIVehicle.GetEngineType(vehicle));
 		while(true) {
-			if(HogeAI.Get().IsInfrastructureMaintenance() && HogeAI.Get().GetUsableMoney() < cost) {
-				HgLog.Warning("CloneVehicle failed. short money. "+this);
-				return null;
-			}
 			HogeAI.WaitForPrice(cost);
 			result = AIVehicle.CloneVehicle(depot, vehicle, true);
 			if(!AIVehicle.IsValidVehicle(result)) {
@@ -3598,19 +3621,8 @@ class CommonRoute extends Route {
 						/* && HogeAI.Get().IsInfrastructureMaintenance()*/) {
 						buildNum = max(1, buildNum);
 					}
-					if(townTransfer) {
-						buildNum = min(HogeAI.Get().IsNetworkMode() ? 2 : 1, buildNum);
-					} else if(!IsSupportMode()) {
-						buildNum = min(buildNum, 4);
-					}
 					if(waitingPressure != null && waitingPressure.enabled) {
 						buildNum = min(buildNum, max(1, waitingPressure.requiredVehicles - vehicleList.Count()));
-						if(GetVehicleType() == AIVehicle.VT_ROAD) {
-							buildNum = min(buildNum, 2);
-						}
-						if(GetVehicleType() == AIVehicle.VT_AIR) {
-							buildNum = min(buildNum, 1);
-						}
 					}
 					buildNum = min(maxVehicles - vehicles.Count(), buildNum) - firstBuild;
 					//if(HogeAI().Get().roiBase) {
@@ -3663,14 +3675,8 @@ class CommonRoute extends Route {
 								}
 							}
 						}						
-						if(latestEngineSet.price > 0) {
-							buildNum = min(HogeAI.Get().GetUsableMoney() / latestEngineSet.price ,buildNum);
-						}
-						buildNum = max(buildNum,1);
-
 						//HgLog.Info("CloneRoadVehicle:"+buildNum+" "+this);
-						local startDate = AIDate.GetCurrentDate();
-						for(local i=0; i<buildNum && AIDate.GetCurrentDate() < startDate + 3; i++) {
+						for(local i=0; i<buildNum; i++) {
 							local c8 = PerformanceCounter.Start("CloneVehicle");	
 							if(CloneVehicle(latestVehicle) == null) {
 								c8.Stop();
@@ -4143,6 +4149,14 @@ class RouteBuilder extends Construction {
 		} else {
 			return defaultValue;
 		}
+	}
+
+	function SetFailureReason(reason) {
+		saveData.failureReason <- reason;
+	}
+
+	function GetFailureReason() {
+		return saveData.rawin("failureReason") ? saveData.failureReason : null;
 	}
 	
 	function GetLabel() {

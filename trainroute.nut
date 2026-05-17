@@ -155,6 +155,7 @@ class TrainRoute extends Route {
 		trainRoute.lastChangeDestDate = t.lastChangeDestDate;
 		trainRoute.lostVehicleCount = t.rawin("lostVehicleCount") ? t.lostVehicleCount : 0;
 		trainRoute.lostSuppressUntil = t.rawin("lostSuppressUntil") ? t.lostSuppressUntil : 0;
+		trainRoute.capacityRedesignDate = t.rawin("capacityRedesignDate") ? t.capacityRedesignDate : null;
 		trainRoute.sharedRailPaths = t.sharedRailPaths;
 		trainRoute.parentRouteId = t.parentRouteId;
 		trainRoute.consumedJunction = t.consumedJunction;
@@ -310,6 +311,7 @@ class TrainRoute extends Route {
 	oldCargoProduction = null;
 	lostVehicleCount = null;
 	lostSuppressUntil = null;
+	capacityRedesignDate = null;
 	sharedRailPaths = null;
 	parentRouteId = null;
 	consumedJunction = null;
@@ -351,6 +353,7 @@ class TrainRoute extends Route {
 		this.cannotChangeDest = false;
 		this.lostVehicleCount = 0;
 		this.lostSuppressUntil = 0;
+		this.capacityRedesignDate = null;
 		this.sharedRailPaths = [];
 		this.parentRouteId = null;
 		this.consumedJunction = null;
@@ -414,6 +417,7 @@ class TrainRoute extends Route {
 		t.oldCargoProduction <- oldCargoProduction;
 		t.lostVehicleCount <- lostVehicleCount;
 		t.lostSuppressUntil <- lostSuppressUntil;
+		t.capacityRedesignDate <- capacityRedesignDate;
 		t.sharedRailPaths <- sharedRailPaths;
 		t.parentRouteId <- parentRouteId;
 		t.consumedJunction <- consumedJunction;
@@ -943,9 +947,9 @@ class TrainRoute extends Route {
 		return a[0];
 	}
 	
-	function GetEngineSets(isAll=false, additionalDistance=null) {
+	function GetEngineSets(isAll=false, additionalDistance=null, cargoProductionOverride=null) {
 		// additionalDistanceは使用されてないかも
-		if(!isAll && additionalDistance==null && engineSetsCache != null && engineSetsCache.len() >= 1) {
+		if(cargoProductionOverride == null && !isAll && additionalDistance==null && engineSetsCache != null && engineSetsCache.len() >= 1) {
 			if(TrainRoute.instances.len()<=1 && HogeAI.Get().roiBase) {
 				return engineSetsCache;
 			}
@@ -1006,7 +1010,7 @@ class TrainRoute extends Route {
 		trainEstimator.distance = GetDistance() + (additionalDistance != null ? additionalDistance : 0);
 		trainEstimator.pathDistance = pathDistance + (additionalDistance != null ? additionalDistance : 0)
 			+ srcHgStation.platformLength + destHgStation.platformLength;
-		trainEstimator.cargoProduction = EstimateCargoProductions();
+		trainEstimator.cargoProduction = cargoProductionOverride != null ? cargoProductionOverride : EstimateCargoProductions();
 		trainEstimator.isBidirectional = IsBiDirectional();
 		trainEstimator.isTransfer = isTransfer;
 		trainEstimator.railType = GetRailType();
@@ -1027,7 +1031,7 @@ class TrainRoute extends Route {
 		trainEstimator.ignoreIncome = IsTransfer();
 		trainEstimator.cargoIsTransfered = GetCargoIsTransfered();
 		
-		if(additionalDistance != null) {
+		if(additionalDistance != null || cargoProductionOverride != null) {
 			return trainEstimator.GetEngineSetsOrder();
 		}
 	
@@ -1037,6 +1041,77 @@ class TrainRoute extends Route {
 		saveData.engineSetsDate = engineSetsDate = AIDate.GetCurrentDate(); // + (IsSingle() ? 3000 : 1000) + AIBase.RandRange(500);
 
 		return engineSetsCache;
+	}
+
+	function GetWagonCountForCargo(engineSet, targetCargo) {
+		if(engineSet == null) return 0;
+		local result = 0;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			if(wagonEngineInfo.cargo == targetCargo) {
+				result += wagonEngineInfo.numWagon;
+			}
+		}
+		return result;
+	}
+
+	function GetCapacityRedesignProduction(strike) {
+		local result = {};
+		local mainPressure = strike.avgCargoPressures.rawin(cargo) ? strike.avgCargoPressures.rawget(cargo) : strike.avgTargetVehicles * GetCargoCapacity(cargo);
+		result.rawset(cargo, max(50, mainPressure));
+		foreach(eachCargo in GetCargos()) {
+			if(eachCargo == cargo) continue;
+			local pressure = strike.avgCargoPressures.rawin(eachCargo) ? strike.avgCargoPressures.rawget(eachCargo) : 0;
+			if(pressure > 0) {
+				result.rawset(eachCargo, pressure);
+			}
+		}
+		return result;
+	}
+
+	function MaybeRedesignCapacityForClone(strike) {
+		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return false;
+		if(latestEngineSet == null) return false;
+		local redesignInterval = 365 * 3;
+		if(startDate == null || AIDate.GetCurrentDate() < startDate + redesignInterval) {
+			return false;
+		}
+		if(capacityRedesignDate != null && AIDate.GetCurrentDate() < capacityRedesignDate + redesignInterval) {
+			return false;
+		}
+		local oldPrimaryCapacity = latestEngineSet.cargoCapacity.rawin(cargo) ? latestEngineSet.cargoCapacity.rawget(cargo) : 0;
+		if(oldPrimaryCapacity <= 0) return false;
+		local cargoProduction = GetCapacityRedesignProduction(strike);
+		local sets = GetEngineSets(false, null, cargoProduction);
+		if(sets.len() == 0) return false;
+		local newEngineSet = sets[0];
+		local newPrimaryCapacity = newEngineSet.cargoCapacity.rawin(cargo) ? newEngineSet.cargoCapacity.rawget(cargo) : 0;
+		local avgPrimaryPressure = strike.avgCargoPressures.rawin(cargo) ? strike.avgCargoPressures.rawget(cargo) : strike.avgTargetVehicles * oldPrimaryCapacity;
+		local oldRequired = oldPrimaryCapacity > 0 ? (avgPrimaryPressure + oldPrimaryCapacity - 1) / oldPrimaryCapacity : 10000;
+		local newRequired = newPrimaryCapacity > 0 ? (avgPrimaryPressure + newPrimaryCapacity - 1) / newPrimaryCapacity : 10000;
+		local oldPrimaryWagons = GetWagonCountForCargo(latestEngineSet, cargo);
+		local newPrimaryWagons = GetWagonCountForCargo(newEngineSet, cargo);
+		local significant = newPrimaryCapacity >= oldPrimaryCapacity * 3 / 2
+				|| oldRequired - newRequired >= 2
+				|| newPrimaryWagons - oldPrimaryWagons >= 2;
+		HgLog.Info("TrainRouteCapacityRedesign oldCap:"+oldPrimaryCapacity
+				+" newCap:"+newPrimaryCapacity
+				+" oldReq:"+oldRequired
+				+" newReq:"+newRequired
+				+" oldWagons:"+oldPrimaryWagons
+				+" newWagons:"+newPrimaryWagons
+				+" significant:"+significant
+				+" "+this);
+		if(!significant || newPrimaryCapacity <= oldPrimaryCapacity) {
+			return false;
+		}
+		saveData.engineSetsCache = engineSetsCache = sets;
+		saveData.engineSetsDate = engineSetsDate = AIDate.GetCurrentDate();
+		saveData.latestEngineSet = latestEngineSet = newEngineSet;
+		saveData.capacityRedesignDate = capacityRedesignDate = AIDate.GetCurrentDate();
+		HgLog.Warning("TrainRouteCapacityRedesign applied oldCap:"+oldPrimaryCapacity
+				+" newCap:"+newPrimaryCapacity
+				+" "+this);
+		return true;
 	}
 	
 	function ChooseEngineSetAllRailTypes() {
@@ -2669,6 +2744,25 @@ class TrainRoute extends Route {
 			}
 			numClone = max(1,min( numClone, waiting / capacity ));
 			if(waitingPressure != null && waitingPressure.enabled) {
+				local state = GetNetworkCapacityState(cargo);
+				state.cargoPressures <- {};
+				foreach(eachCargo in GetCargos()) {
+					local cargoPressure = GetRouteWaitingPressure(eachCargo);
+					state.cargoPressures.rawset(eachCargo, cargoPressure.pressure);
+				}
+				local strike = CheckCapacityStrike("train_buy_demand", "target:"+state.targetVehicles+" current:"+state.currentVehicles, state);
+				if(strike.pending) {
+					return;
+				}
+				if(!strike.allowed) {
+					HgLog.Info("TrainRouteCloneWaitingDemand hold "+GetRouteWaitingPressureLog(cargo)+" strike:"+strike.count+" "+this);
+					return;
+				}
+				MaybeRedesignCapacityForClone(strike);
+				latestVehicle = GetLatestVehicle();
+				latestEngineSet = GetLatestEngineSet();
+				capacity = GetCargoCapacity(cargo);
+				if(capacity <= 0) return;
 				numClone = min(numClone, max(1, waitingPressure.requiredVehicles - numVehicles));
 				HgLog.Info("TrainRouteCloneWaitingDemand "+GetRouteWaitingPressureLog(cargo)+" numClone:"+numClone+" "+this);
 			}
@@ -3222,6 +3316,10 @@ class TrainRouteBuilder extends RouteBuilder {
 			if(engineSets.len()==0) {
 				if(trainEstimator.tooShortMoney == true) {
 					HgLog.Warning("TrainRoute: tooShortMoney "+explain);
+					if(HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo)) {
+						SetFailureReason("tooShortMoney");
+						return false;
+					}
 				}
 				if(options.rawin("estimate")) {
 					engineSet = options.estimate;
