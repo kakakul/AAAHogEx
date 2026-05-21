@@ -120,11 +120,11 @@
 
 		AddSetting({name = "disable_prefixed_station_name",
 			description = "Disable prefixed station names",
-			//default_value = 0,
-			easy_value = 0,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
+			//default_value = 1,
+			easy_value = 1,
+			medium_value = 1,
+			hard_value = 1,
+			custom_value = 1,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
