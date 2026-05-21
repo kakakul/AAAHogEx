@@ -128,14 +128,14 @@
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
-		AddSetting({name = "IsDebug",
-			description = "Debug",
-			//default_value = 0,
-			easy_value = 0,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
-			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		// AddSetting({name = "IsDebug",
+		// 	description = "Debug",
+		// 	//default_value = 0,
+		// 	easy_value = 0,
+		// 	medium_value = 0,
+		// 	hard_value = 0,
+		// 	custom_value = 0,
+		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "network_mode",
 			description = "Network mode: connect all towns into a single network, while freight lines will share rail infrastructure.",
