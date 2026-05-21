@@ -110,7 +110,7 @@
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "IsForceToHandleFright",
-			description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)",
+			description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)(Unused in network mode)",
 			//default_value = 0,
 			easy_value = 1,
 			medium_value = 0,
