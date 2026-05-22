@@ -1322,7 +1322,9 @@ class HogeAI extends AIController {
 			}*/
 			
 
-			SearchAndBuildAdditionalDestAsFarAsPossible( route );
+			if(!IsNetworkMode()) {
+				SearchAndBuildAdditionalDestAsFarAsPossible( route );
+			}
 			CheckBuildReturnRoute(route, null, returnStats);
 			DoInterval();
 			
