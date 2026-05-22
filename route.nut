@@ -197,6 +197,10 @@ class Route {
 		t.vehicleBuyBlockReason <- vehicleBuyBlockReason;
 	}
 
+	function GetTraceLogPart() {
+		return routeTraceId == null ? "" : " trace:"+routeTraceId;
+	}
+
 	function GetRouteClass() {
 		return Route.Class(GetVehicleType());
 	}
@@ -2553,10 +2557,6 @@ class CommonRoute extends Route {
 			removeStart = removeStart
 		};
 		Route.SaveTo(saveData);
-	}
-
-	function GetTraceLogPart() {
-		return routeTraceId == null ? "" : " trace:"+routeTraceId;
 	}
 
 	function SetCannotChangeDest(cannotChangeDest) {
