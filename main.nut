@@ -84,6 +84,7 @@ class HogeAI extends AIController {
 	lastScanRouteDates = null;
 	mountain = null;
 	noRouteCnadidates = null;
+	lostVehicleDiagnostics = null;
 	
 	yeti = null;
 	ecs = null;
@@ -263,6 +264,7 @@ class HogeAI extends AIController {
 		pendingConstructions = {};
 		lastScanRouteDates = {};
 		noRouteCnadidates = false;
+		lostVehicleDiagnostics = {};
 	}
 	
 	function Start() {
@@ -4027,6 +4029,7 @@ class HogeAI extends AIController {
 		
 		local execMode = AIExecMode();
 		CheckEvent();
+		CheckLostVehicleDiagnostics();
 		times.push(AIDate.GetCurrentDate()); //0
 		
 		CommonRoute.CheckOldVehicles();
@@ -4121,6 +4124,95 @@ class HogeAI extends AIController {
 		}
 	}
 
+	function GetVehicleStateText(vehicle) {
+		local state = AIVehicle.GetState(vehicle);
+		local stateText = "" + state;
+		if(state == AIVehicle.VS_RUNNING) {
+			stateText = "RUNNING";
+		} else if(state == AIVehicle.VS_AT_STATION) {
+			stateText = "AT_STATION";
+		} else if(state == AIVehicle.VS_CRASHED) {
+			stateText = "CRASHED";
+		} else if(AIVehicle.IsInDepot(vehicle)) {
+			stateText = "IN_DEPOT";
+		}
+		return stateText + "(" + state + ")";
+	}
+
+	function GetOrderDestinationText(vehicle, orderCount) {
+		if(orderCount <= 0) {
+			return "none";
+		}
+		local destination = AIOrder.GetOrderDestination(vehicle, AIOrder.ORDER_CURRENT);
+		return destination == null ? "null" : HgTile(destination);
+	}
+
+	function GetLostVehicleDiagnostic(vehicle, route, reason = null) {
+		if(!AIVehicle.IsValidVehicle(vehicle)) {
+			return "vehicle:" + vehicle + " invalid";
+		}
+		local orderCount = AIOrder.GetOrderCount(vehicle);
+		local orderIndex = orderCount <= 0 ? -1 : AIOrder.ResolveOrderPosition(vehicle, AIOrder.ORDER_CURRENT);
+		local orderFlags = orderCount <= 0 ? 0 : AIOrder.GetOrderFlags(vehicle, AIOrder.ORDER_CURRENT);
+		local location = AIVehicle.GetLocation(vehicle);
+		local routeNow = route != null ? route : Route.GetRouteByVehicle(vehicle);
+		return (reason == null ? "" : "reason:" + reason + " ")
+			+ "vehicle:" + vehicle
+			+ " name:" + AIVehicle.GetName(vehicle)
+			+ " tile:" + HgTile(location)
+			+ " speed:" + AIVehicle.GetCurrentSpeed(vehicle)
+			+ " state:" + GetVehicleStateText(vehicle)
+			+ " order:" + orderIndex + "/" + orderCount
+			+ " orderDest:" + GetOrderDestinationText(vehicle, orderCount)
+			+ " orderFlags:" + orderFlags
+			+ " route:" + (routeNow == null ? "null" : routeNow);
+	}
+
+	function TrackLostTrain(vehicle) {
+		if(lostVehicleDiagnostics == null) {
+			lostVehicleDiagnostics = {};
+		}
+		lostVehicleDiagnostics.rawset(vehicle, {
+			firstDate = AIDate.GetCurrentDate(),
+			lastTile = AIVehicle.GetLocation(vehicle),
+			lastLogDate = AIDate.GetCurrentDate()
+		});
+	}
+
+	function CheckLostVehicleDiagnostics() {
+		if(lostVehicleDiagnostics == null || lostVehicleDiagnostics.len() == 0) {
+			return;
+		}
+		local resolved = [];
+		foreach(vehicle, diagnostic in lostVehicleDiagnostics) {
+			if(!AIVehicle.IsValidVehicle(vehicle)) {
+				HgLog.Warning("TrainLostDiag resolved vehicle:" + vehicle + " invalid first:" + diagnostic.firstDate);
+				resolved.push(vehicle);
+				continue;
+			}
+			local tile = AIVehicle.GetLocation(vehicle);
+			local speed = AIVehicle.GetCurrentSpeed(vehicle);
+			local maxSpeed = AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(vehicle));
+			local moved = diagnostic.rawin("lastTile") && diagnostic.lastTile != tile;
+			local recovered = maxSpeed > 0 && speed > maxSpeed / 2;
+			local reason = recovered ? "speed_recovered" : "still_lost";
+			HgLog.Warning("TrainLostDiag " + GetLostVehicleDiagnostic(vehicle, null, reason)
+				+ " maxSpeed:" + maxSpeed
+				+ " movedTile:" + moved
+				+ " first:" + diagnostic.firstDate
+				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			if(recovered) {
+				resolved.push(vehicle);
+			} else {
+				diagnostic.lastTile <- tile;
+				diagnostic.lastLogDate <- AIDate.GetCurrentDate();
+			}
+		}
+		foreach(vehicle in resolved) {
+			lostVehicleDiagnostics.rawdelete(vehicle);
+		}
+	}
+
 	function OnVehicleLost(event) {
 		local vehicle = event.GetVehicleID();
 		if(!AIVehicle.IsValidVehicle(vehicle)) {
@@ -4129,7 +4221,10 @@ class HogeAI extends AIController {
 		}
 		local vehicleType = AIVehicle.GetVehicleType(vehicle);
 		local route = Route.GetRouteByVehicle(vehicle);
-		HgLog.Warning("ET_VEHICLE_LOST:"+VehicleUtils.GetTypeName(vehicleType)+" "+ vehicle+" "+AIVehicle.GetName(vehicle)+" "+route);
+		HgLog.Warning("ET_VEHICLE_LOST:" + VehicleUtils.GetTypeName(vehicleType) + " " + GetLostVehicleDiagnostic(vehicle, route, "event"));
+		if(vehicleType == AIVehicle.VT_RAIL) {
+			TrackLostTrain(vehicle);
+		}
 		if(route != null) {
 			route.OnVehicleLost(vehicle);
 		} else {
@@ -4170,6 +4265,7 @@ class HogeAI extends AIController {
 		table.cargoVtDistanceValues <- cargoVtDistanceValues;
 		table.lastTransferCandidates <- lastTransferCandidates;
 		table.lastScanRouteDates <- lastScanRouteDates;
+		table.lostVehicleDiagnostics <- lostVehicleDiagnostics;
 		Place.SaveStatics(table);
 
 		HgLog.Info("Place.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
@@ -4275,6 +4371,9 @@ class HogeAI extends AIController {
 			lastTransferCandidates = loadData.lastTransferCandidates;
 		}
 		lastScanRouteDates = loadData.lastScanRouteDates;
+		if(loadData.rawin("lostVehicleDiagnostics")) {
+			lostVehicleDiagnostics = loadData.lostVehicleDiagnostics;
+		}
 		Place.LoadStatics(loadData);
 		HgStation.LoadStatics(loadData);
 		TrainInfoDictionary.LoadStatics(loadData);
