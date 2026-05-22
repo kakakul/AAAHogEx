@@ -2339,8 +2339,10 @@ class HgStation {
 		local isForTownPaxMail = false;
 		if(!(this instanceof PieceStation)) {
 			isTownPlace = place != null && cargo != null && place instanceof TownCargo;
-			//isForTownPaxMail = isTownPlace && CargoUtils.IsPaxOrMail(cargo);
-			CheckBuildTownBus();
+			isForTownPaxMail = isTownPlace && CargoUtils.IsPaxOrMail(cargo);
+			if(!HogeAI.Get().IsNetworkMode() || isForTownPaxMail) {
+				CheckBuildTownBus();
+			}
 		}
 
 		if(!builded) {
