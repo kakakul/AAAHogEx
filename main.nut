@@ -4168,6 +4168,112 @@ class HogeAI extends AIController {
 			+ " route:" + (routeNow == null ? "null" : routeNow);
 	}
 
+	function AppendLostTrainSignalPath(paths, label, buildedPath) {
+		if(buildedPath != null && buildedPath.array_ != null && buildedPath.array_.len() >= 2) {
+			paths.push({label = label, path = buildedPath.array_});
+		}
+	}
+
+	function GetLostTrainSignalPaths(route) {
+		local paths = [];
+		if(route == null) {
+			return paths;
+		}
+		if(route instanceof TrainRoute) {
+			AppendLostTrainSignalPath(paths, "srcToDest", route.pathSrcToDest);
+			AppendLostTrainSignalPath(paths, "destToSrc", route.pathDestToSrc);
+			if(route.sharedRailPaths != null) {
+				foreach(i, path in route.sharedRailPaths) {
+					if(path != null && path.len() >= 2) {
+						paths.push({label = "shared" + i, path = path});
+					}
+				}
+			}
+		} else if(route instanceof TrainReturnRoute) {
+			AppendLostTrainSignalPath(paths, "srcArrival", route.srcArrivalPath);
+			AppendLostTrainSignalPath(paths, "srcDeparture", route.srcDeparturePath);
+			AppendLostTrainSignalPath(paths, "destArrival", route.destArrivalPath);
+			AppendLostTrainSignalPath(paths, "destDeparture", route.destDeparturePath);
+		}
+		return paths;
+	}
+
+	function GetSignalText(signalType) {
+		if(signalType == AIRail.SIGNALTYPE_NONE) {
+			return "none";
+		}
+		if(signalType == AIRail.SIGNALTYPE_PBS_ONEWAY) {
+			return "pbs_oneway";
+		}
+		return "" + signalType;
+	}
+
+	function GetLostTrainSignalScan(vehicle, route) {
+		if(route == null) {
+			return " route:null";
+		}
+		local paths = GetLostTrainSignalPaths(route);
+		if(paths.len() == 0) {
+			return " signalPath:none";
+		}
+		local location = AIVehicle.GetLocation(vehicle);
+		local best = null;
+		foreach(pathInfo in paths) {
+			foreach(i, tile in pathInfo.path) {
+				local distance = AIMap.DistanceManhattan(location, tile);
+				if(best == null || distance < best.distance) {
+					best = {label = pathInfo.label, path = pathInfo.path, index = i, distance = distance};
+					if(distance == 0) {
+						break;
+					}
+				}
+			}
+		}
+		if(best == null) {
+			return " signalPath:notFound";
+		}
+		local startIndex = max(1, best.index - 20);
+		local endIndex = min(best.path.len() - 2, best.index + 20);
+		local signals = [];
+		for(local i = startIndex; i <= endIndex; i++) {
+			local prev = best.path[i - 1];
+			local tile = best.path[i];
+			local next = best.path[i + 1];
+			if(!AIRail.IsRailTile(tile)) {
+				continue;
+			}
+			local forwardSignal = AIRail.SIGNALTYPE_NONE;
+			local backwardSignal = AIRail.SIGNALTYPE_NONE;
+			if(AIMap.DistanceManhattan(tile, next) == 1) {
+				forwardSignal = AIRail.GetSignalType(tile, next);
+			}
+			if(AIMap.DistanceManhattan(tile, prev) == 1) {
+				backwardSignal = AIRail.GetSignalType(tile, prev);
+			}
+			if(forwardSignal == AIRail.SIGNALTYPE_NONE && backwardSignal == AIRail.SIGNALTYPE_NONE) {
+				continue;
+			}
+			local flags = "";
+			if(backwardSignal != AIRail.SIGNALTYPE_NONE && forwardSignal == AIRail.SIGNALTYPE_NONE) {
+				flags = " opposite";
+			} else if(backwardSignal != AIRail.SIGNALTYPE_NONE && forwardSignal != AIRail.SIGNALTYPE_NONE) {
+				flags = " both";
+			}
+			signals.push("[" + i
+				+ " " + HgTile(tile)
+				+ " prev:" + HgTile(prev)
+				+ " next:" + HgTile(next)
+				+ " forward:" + GetSignalText(forwardSignal)
+				+ " backward:" + GetSignalText(backwardSignal)
+				+ flags + "]");
+		}
+		return " signalPath:" + best.label
+			+ " nearestIndex:" + best.index
+			+ " nearestDistance:" + best.distance
+			+ " window:" + startIndex + "-" + endIndex
+			+ " signals:" + (signals.len() == 0 ? "none" : HgArray(signals));
+	}
+
 	function TrackLostTrain(vehicle) {
 		if(lostVehicleDiagnostics == null) {
 			lostVehicleDiagnostics = {};
@@ -4201,6 +4307,8 @@ class HogeAI extends AIController {
 				+ " movedTile:" + moved
 				+ " first:" + diagnostic.firstDate
 				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			HgLog.Warning("TrainLostSignals vehicle:" + vehicle
+				+ GetLostTrainSignalScan(vehicle, Route.GetRouteByVehicle(vehicle)));
 			if(recovered) {
 				resolved.push(vehicle);
 			} else {
