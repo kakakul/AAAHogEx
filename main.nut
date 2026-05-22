@@ -4202,6 +4202,21 @@ class HogeAI extends AIController {
 		if(signalType == AIRail.SIGNALTYPE_NONE) {
 			return "none";
 		}
+		if(signalType == AIRail.SIGNALTYPE_NORMAL) {
+			return "normal";
+		}
+		if(signalType == AIRail.SIGNALTYPE_ENTRY) {
+			return "entry";
+		}
+		if(signalType == AIRail.SIGNALTYPE_EXIT) {
+			return "exit";
+		}
+		if(signalType == AIRail.SIGNALTYPE_COMBO) {
+			return "combo";
+		}
+		if(signalType == AIRail.SIGNALTYPE_PBS) {
+			return "pbs";
+		}
 		if(signalType == AIRail.SIGNALTYPE_PBS_ONEWAY) {
 			return "pbs_oneway";
 		}
@@ -4274,6 +4289,117 @@ class HogeAI extends AIController {
 			+ " signals:" + (signals.len() == 0 ? "none" : HgArray(signals));
 	}
 
+	function RepairLostTrainWrongSignals(vehicle, route) {
+		if(!IsNetworkMode() || route == null) {
+			return 0;
+		}
+		local paths = GetLostTrainSignalPaths(route);
+		if(paths.len() == 0) {
+			return 0;
+		}
+		local location = AIVehicle.GetLocation(vehicle);
+		local best = null;
+		foreach(pathInfo in paths) {
+			foreach(i, tile in pathInfo.path) {
+				local distance = AIMap.DistanceManhattan(location, tile);
+				if(best == null || distance < best.distance) {
+					best = {label = pathInfo.label, path = pathInfo.path, index = i, distance = distance};
+					if(distance == 0) {
+						break;
+					}
+				}
+			}
+		}
+		if(best == null) {
+			return 0;
+		}
+
+		local repaired = 0;
+		local startIndex = max(1, best.index - 20);
+		local endIndex = min(best.path.len() - 2, best.index + 20);
+		for(local i = startIndex; i <= endIndex; i++) {
+			local prev = best.path[i - 1];
+			local tile = best.path[i];
+			local next = best.path[i + 1];
+			if(!AIRail.IsRailTile(tile)
+					|| AIMap.DistanceManhattan(tile, prev) != 1
+					|| AIMap.DistanceManhattan(tile, next) != 1) {
+				continue;
+			}
+			local forwardSignal = AIRail.GetSignalType(tile, next);
+			local backwardSignal = AIRail.GetSignalType(tile, prev);
+			if(forwardSignal != AIRail.SIGNALTYPE_NONE
+					|| backwardSignal != AIRail.SIGNALTYPE_PBS_ONEWAY) {
+				continue;
+			}
+
+			local removed = BuildUtils.RemoveSignalSafe(tile, prev);
+			local built = false;
+			if(removed) {
+				built = BuildUtils.BuildSignalSafe(tile, next, AIRail.SIGNALTYPE_PBS_ONEWAY);
+			}
+			if(built) {
+				repaired++;
+			}
+			HgLog.Warning("TrainLostSignalRepair tile:" + HgTile(tile)
+				+ " prev:" + HgTile(prev)
+				+ " next:" + HgTile(next)
+				+ " signalPath:" + best.label
+				+ " index:" + i
+				+ " removed:" + removed
+				+ " built:" + built
+				+ " vehicle:" + vehicle
+				+ " route:" + route);
+		}
+		return repaired;
+	}
+
+	function GetLostTrainLocalSignalScan(vehicle) {
+		local center = AIVehicle.GetLocation(vehicle);
+		local radius = 8;
+		local centerX = AIMap.GetTileX(center);
+		local centerY = AIMap.GetTileY(center);
+		local minX = max(1, centerX - radius);
+		local maxX = min(AIMap.GetMapSizeX() - 2, centerX + radius);
+		local minY = max(1, centerY - radius);
+		local maxY = min(AIMap.GetMapSizeY() - 2, centerY + radius);
+		local signals = [];
+		local railTiles = 0;
+		local dirs = [
+			[-1, 0],
+			[1, 0],
+			[0, -1],
+			[0, 1]
+		];
+		for(local x = minX; x <= maxX; x++) {
+			for(local y = minY; y <= maxY; y++) {
+				local tile = AIMap.GetTileIndex(x, y);
+				if(!AIRail.IsRailTile(tile)) {
+					continue;
+				}
+				railTiles++;
+				local tileSignals = [];
+				foreach(dir in dirs) {
+					local neighbor = AIMap.GetTileIndex(x + dir[0], y + dir[1]);
+					local signalType = AIRail.GetSignalType(tile, neighbor);
+					if(signalType != AIRail.SIGNALTYPE_NONE) {
+						tileSignals.push("to:" + HgTile(neighbor) + "=" + GetSignalText(signalType));
+					}
+				}
+				if(tileSignals.len() >= 1) {
+					signals.push("[" + HgTile(tile)
+						+ " dist:" + AIMap.DistanceManhattan(center, tile)
+						+ " tracks:" + AIRail.GetRailTracks(tile)
+						+ " " + HgArray(tileSignals) + "]");
+				}
+			}
+		}
+		return " center:" + HgTile(center)
+			+ " radius:" + radius
+			+ " railTiles:" + railTiles
+			+ " signals:" + (signals.len() == 0 ? "none" : HgArray(signals));
+	}
+
 	function TrackLostTrain(vehicle) {
 		if(lostVehicleDiagnostics == null) {
 			lostVehicleDiagnostics = {};
@@ -4307,8 +4433,17 @@ class HogeAI extends AIController {
 				+ " movedTile:" + moved
 				+ " first:" + diagnostic.firstDate
 				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			local route = Route.GetRouteByVehicle(vehicle);
 			HgLog.Warning("TrainLostSignals vehicle:" + vehicle
-				+ GetLostTrainSignalScan(vehicle, Route.GetRouteByVehicle(vehicle)));
+				+ GetLostTrainSignalScan(vehicle, route));
+			local repairedSignals = RepairLostTrainWrongSignals(vehicle, route);
+			if(repairedSignals > 0) {
+				HgLog.Warning("TrainLostSignalRepairSummary vehicle:" + vehicle
+					+ " repaired:" + repairedSignals
+					+ " route:" + route);
+			}
+			HgLog.Warning("TrainLostLocalSignals vehicle:" + vehicle
+				+ GetLostTrainLocalSignalScan(vehicle));
 			if(recovered) {
 				resolved.push(vehicle);
 			} else {
