@@ -4358,7 +4358,7 @@ class HogeAI extends AIController {
 
 	function GetLostTrainLocalSignalScan(vehicle) {
 		local center = AIVehicle.GetLocation(vehicle);
-		local radius = 8;
+		local radius = 20;
 		local centerX = AIMap.GetTileX(center);
 		local centerY = AIMap.GetTileY(center);
 		local minX = max(1, centerX - radius);
@@ -4406,9 +4406,29 @@ class HogeAI extends AIController {
 		if(lostVehicleDiagnostics == null) {
 			lostVehicleDiagnostics = {};
 		}
+		local tile = AIVehicle.GetLocation(vehicle);
+		if(lostVehicleDiagnostics.rawin(vehicle)) {
+			local diagnostic = lostVehicleDiagnostics.rawget(vehicle);
+			if(!diagnostic.rawin("eventTiles")) {
+				diagnostic.eventTiles <- [];
+			}
+			diagnostic.eventTiles.push(tile);
+			diagnostic.lastEventTile <- tile;
+			diagnostic.lastEventDate <- AIDate.GetCurrentDate();
+			HgLog.Warning("TrainLostDiag eventUpdate vehicle:" + vehicle
+				+ " eventTile:" + HgTile(tile)
+				+ " events:" + diagnostic.eventTiles.len()
+				+ " firstTile:" + (diagnostic.rawin("firstTile") ? HgTile(diagnostic.firstTile) : "null")
+				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			return;
+		}
 		lostVehicleDiagnostics.rawset(vehicle, {
 			firstDate = AIDate.GetCurrentDate(),
-			lastTile = AIVehicle.GetLocation(vehicle),
+			firstTile = tile,
+			eventTiles = [tile],
+			lastEventTile = tile,
+			lastEventDate = AIDate.GetCurrentDate(),
+			lastTile = tile,
 			lastLogDate = AIDate.GetCurrentDate()
 		});
 	}
@@ -4427,12 +4447,20 @@ class HogeAI extends AIController {
 			local tile = AIVehicle.GetLocation(vehicle);
 			local speed = AIVehicle.GetCurrentSpeed(vehicle);
 			local maxSpeed = AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(vehicle));
+			if(!diagnostic.rawin("firstTile")) {
+				diagnostic.firstTile <- diagnostic.rawin("lastTile") ? diagnostic.lastTile : tile;
+			}
 			local moved = diagnostic.rawin("lastTile") && diagnostic.lastTile != tile;
-			local recovered = maxSpeed > 0 && speed > maxSpeed / 2;
+			local movedFromLost = AIMap.DistanceManhattan(diagnostic.firstTile, tile);
+			local recovered = maxSpeed > 0 && speed * 4 > maxSpeed * 3 && movedFromLost > 20;
 			local reason = recovered ? "speed_recovered" : "still_lost";
 			HgLog.Warning("TrainLostDiag " + GetLostVehicleDiagnostic(vehicle, null, reason)
 				+ " maxSpeed:" + maxSpeed
 				+ " movedTile:" + moved
+				+ " firstTile:" + HgTile(diagnostic.firstTile)
+				+ " lastEventTile:" + (diagnostic.rawin("lastEventTile") ? HgTile(diagnostic.lastEventTile) : "null")
+				+ " events:" + (diagnostic.rawin("eventTiles") ? diagnostic.eventTiles.len() : 0)
+				+ " movedFromLost:" + movedFromLost
 				+ " first:" + diagnostic.firstDate
 				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
 			local route = Route.GetRouteByVehicle(vehicle);
@@ -4446,11 +4474,7 @@ class HogeAI extends AIController {
 			}
 			HgLog.Warning("TrainLostLocalSignals vehicle:" + vehicle
 				+ GetLostTrainLocalSignalScan(vehicle));
-			if(AIVehicle.IsInDepot(vehicle)) {
-				HgLog.Warning("TrainLostRescueDepot resolved vehicle:" + vehicle
-					+ " inDepot:true route:" + route);
-				resolved.push(vehicle);
-			} else if(recovered) {
+			if(recovered) {
 				resolved.push(vehicle);
 			} else {
 				local daysLost = AIDate.GetCurrentDate() - diagnostic.firstDate;
@@ -4462,7 +4486,16 @@ class HogeAI extends AIController {
 					}
 					local hasActiveRescueDepot = diagnostic.rawin("rescueDepot") && diagnostic.rescueDepot != null
 						&& diagnostic.rawin("rescueDepotDate");
-					if(hasActiveRescueDepot && AIDate.GetCurrentDate() - diagnostic.rescueDepotDate >= 30) {
+					if(hasActiveRescueDepot && AIVehicle.IsInDepot(vehicle)) {
+						local sent = AIVehicle.SendVehicleToDepot(vehicle);
+						HgLog.Warning("TrainLostRescueDepotInDepot vehicle:" + vehicle
+							+ " depot:" + HgTile(diagnostic.rescueDepot)
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " daysLost:" + daysLost
+							+ " route:" + route);
+					} else if(hasActiveRescueDepot && AIDate.GetCurrentDate() - diagnostic.rescueDepotDate >= 30) {
 						local depot = diagnostic.rescueDepot;
 						local removed = false;
 						if(AIRail.IsRailDepotTile(depot) && AICompany.IsMine(AITile.GetOwner(depot))) {
