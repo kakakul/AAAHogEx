@@ -4446,9 +4446,72 @@ class HogeAI extends AIController {
 			}
 			HgLog.Warning("TrainLostLocalSignals vehicle:" + vehicle
 				+ GetLostTrainLocalSignalScan(vehicle));
-			if(recovered) {
+			if(AIVehicle.IsInDepot(vehicle)) {
+				HgLog.Warning("TrainLostRescueDepot resolved vehicle:" + vehicle
+					+ " inDepot:true route:" + route);
+				resolved.push(vehicle);
+			} else if(recovered) {
 				resolved.push(vehicle);
 			} else {
+				local daysLost = AIDate.GetCurrentDate() - diagnostic.firstDate;
+				if(daysLost >= 30 && route != null && route.GetVehicleType() == AIVehicle.VT_RAIL
+						&& "CreateRescueDepotNear" in route) {
+					CommonRoute.vehicleRemoving.rawset(vehicle, true);
+					if(!diagnostic.rawin("triedRescueDepots")) {
+						diagnostic.triedRescueDepots <- {};
+					}
+					local hasActiveRescueDepot = diagnostic.rawin("rescueDepot") && diagnostic.rescueDepot != null
+						&& diagnostic.rawin("rescueDepotDate");
+					if(hasActiveRescueDepot && AIDate.GetCurrentDate() - diagnostic.rescueDepotDate >= 30) {
+						local depot = diagnostic.rescueDepot;
+						local removed = false;
+						if(AIRail.IsRailDepotTile(depot) && AICompany.IsMine(AITile.GetOwner(depot))) {
+							removed = HgTile(depot).RemoveDepot();
+						}
+						HgLog.Warning("TrainLostRescueDepotRetry vehicle:" + vehicle
+							+ " oldDepot:" + HgTile(depot)
+							+ " removed:" + removed
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " route:" + route);
+						diagnostic.rescueDepot = null;
+						diagnostic.rescueDepotFront = null;
+					} else if(hasActiveRescueDepot) {
+						local sent = AIVehicle.SendVehicleToDepot(vehicle);
+						HgLog.Warning("TrainLostRescueDepotIntervalSend vehicle:" + vehicle
+							+ " depot:" + HgTile(diagnostic.rescueDepot)
+							+ " front:" + (diagnostic.rawin("rescueDepotFront") && diagnostic.rescueDepotFront != null ? HgTile(diagnostic.rescueDepotFront) : "null")
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " daysLost:" + daysLost
+							+ " route:" + route);
+					}
+					if((!diagnostic.rawin("rescueDepot") || diagnostic.rescueDepot == null)
+							&& (!diagnostic.rawin("rescueExhausted") || !diagnostic.rescueExhausted)) {
+						local depotResult = route.CreateRescueDepotNear(tile, diagnostic.triedRescueDepots);
+						local depot = depotResult == null ? null : depotResult.depot;
+						local sent = false;
+						if(depot != null) {
+							diagnostic.rescueDepot <- depot;
+							diagnostic.rescueDepotFront <- depotResult.front;
+							diagnostic.rescueDepotDate <- AIDate.GetCurrentDate();
+							sent = AIVehicle.SendVehicleToDepot(vehicle);
+						} else {
+							diagnostic.rescueExhausted <- true;
+						}
+						HgLog.Warning("TrainLostRescueDepotSend vehicle:" + vehicle
+							+ " depot:" + (depot == null ? "null" : HgTile(depot))
+							+ " front:" + (depotResult == null || depotResult.front == null ? "null" : HgTile(depotResult.front))
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysLost:" + daysLost
+							+ " checked:" + (depotResult == null ? "null" : depotResult.checked)
+							+ " exhausted:" + (depotResult == null ? true : depotResult.exhausted)
+							+ " tried:" + diagnostic.triedRescueDepots.len()
+							+ " route:" + route);
+					}
+				}
 				diagnostic.lastTile <- tile;
 				diagnostic.lastLogDate <- AIDate.GetCurrentDate();
 			}
