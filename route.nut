@@ -707,8 +707,8 @@ class Route {
 		local destWait = IsBiDirectional()
 			? CargoUtils.GetEffectiveCargoWaiting(destHgStation.stationId, srcHgStation.stationId, cargo)
 			: 0;
-		local avgWait = IsBiDirectional() ? (srcWait + destWait) / 2 : srcWait;
-		local maxWait = max(srcWait, destWait);
+		local avgWait = (IsBiDirectional() ? (srcWait + destWait) / 2 : srcWait) * 90 / 100;
+		local maxWait = max(srcWait, destWait) * 90 / 100;
 		local pressure = maxWait + avgWait;
 		local requiredVehicles = (pressure + capacity - 1) / capacity;
 		local thresholdMax = capacity;
