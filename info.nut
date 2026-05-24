@@ -26,23 +26,23 @@
 			{_1 = "Pax and mail only", _2="Freight only", _3="All"});
 
 
-		AddSetting({name = "disable_veh_train",
-			description = "Disable trains",
-			//default_value = 0,
-			easy_value = 0,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
-			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		// AddSetting({name = "disable_veh_train",
+		// 	description = "Disable trains",
+		// 	//default_value = 0,
+		// 	easy_value = 0,
+		// 	medium_value = 0,
+		// 	hard_value = 0,
+		// 	custom_value = 0,
+		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
-		AddSetting({name = "disable_veh_roadveh",
-			description = "Disable road vehicles",
-			//default_value = 0,
-			easy_value = 0,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
-			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		// AddSetting({name = "disable_veh_roadveh",
+		// 	description = "Disable road vehicles",
+		// 	//default_value = 0,
+		// 	easy_value = 0,
+		// 	medium_value = 0,
+		// 	hard_value = 0,
+		// 	custom_value = 0,
+		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "disable_veh_tram",
 			description = "Disable trams",
@@ -91,14 +91,14 @@
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
-		AddSetting({name = "IsAvoidExtendCoverageAreaInTowns",
-			description = "Avoid joining stations solely to extend coverage area in towns",
-			//default_value = 0,
-			easy_value = 1,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
-			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		// AddSetting({name = "IsAvoidExtendCoverageAreaInTowns",
+		// 	description = "Avoid joining stations solely to extend coverage area in towns",
+		// 	//default_value = 0,
+		// 	easy_value = 1,
+		// 	medium_value = 0,
+		// 	hard_value = 0,
+		// 	custom_value = 0,
+		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "IsPreferReusingExistingRoads",
 			description = "Prefer reusing existing roads. Before building new roads, the AI checks whether existing roads can be used. This helps prevent the map from becoming cluttered with too many roads.",
@@ -109,14 +109,14 @@
 			custom_value = 0,
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
-		AddSetting({name = "IsForceToHandleFright",
-			description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)(Unused in network mode)",
-			//default_value = 0,
-			easy_value = 1,
-			medium_value = 0,
-			hard_value = 0,
-			custom_value = 0,
-			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		// AddSetting({name = "IsForceToHandleFright",
+		// 	description = "Force to start handling the freight, once the funds are stabilized (To prevent this AI from sometimes only dealing with passengers and mails as a result of profit-first calculations)(Unused in network mode)",
+		// 	//default_value = 0,
+		// 	easy_value = 1,
+		// 	medium_value = 0,
+		// 	hard_value = 0,
+		// 	custom_value = 0,
+		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "disable_prefixed_station_name",
 			description = "Disable prefixed station names",
