@@ -806,6 +806,15 @@ class PaxMailNetwork {
 					+" edgeDist:"+candidate.edgeDistance
 					+" production:"+candidate.production
 					+" "+candidate.explain);
+			local estimatedBuildCost = ai.GetEstimatedBuildCost(candidate);
+			if(estimatedBuildCost > ai.GetUsableMoney()) {
+				HgLog.Info("PaxMailNetwork.DeferBuild id:"+candidate.routeTraceId
+						+" estimatedBuildCost:"+estimatedBuildCost
+						+" usableMoney:"+ai.GetUsableMoney()
+						+" "+candidate.explain);
+				HgLog.Info("} ConnectUnservedTowns built");
+				return;
+			}
 			ai.DoInterval();
 			local builder = ai.CreateBuilder(candidate, pendingPlans, dirtyPlaces, ai.limitDate);
 			if(builder != null) {

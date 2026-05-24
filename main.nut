@@ -4873,6 +4873,24 @@ class HogeAI extends AIController {
 	function IsTooExpensive(cost) {
 		return HogeAI.GetQuarterlyIncome(4) < cost && HogeAI.GetUsableMoney() < cost;
 	}
+
+	function GetEstimatedBuildCost(plan) {
+		if(!plan.rawin("estimate") || plan.estimate == null) return 0;
+		local estimate = plan.estimate;
+		local result = 0;
+		if(estimate.rawin("buildingCost") && estimate.buildingCost != null) {
+			result += estimate.buildingCost;
+		}
+		if(estimate.rawin("price") && estimate.price != null) {
+			result += estimate.price;
+		}
+		return result;
+	}
+
+	function HasEstimatedBuildMoney(plan) {
+		local estimatedBuildCost = GetEstimatedBuildCost(plan);
+		return estimatedBuildCost <= 0 || GetUsableMoney() >= estimatedBuildCost;
+	}
 	
 	function HasIncome(money) {
 		return HogeAI.GetQuarterlyIncome() >= HogeAI.GetInflatedMoney(money);

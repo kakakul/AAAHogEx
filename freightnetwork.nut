@@ -227,6 +227,13 @@ class FreightNetwork {
 				+ bestCandidate.dest + "<=" + bestCandidate.src
 				+ "[" + AICargo.GetName(bestCandidate.cargo) + "] dist:" + bestCandidate.distance
 		};
+		local estimatedBuildCost = ai.GetEstimatedBuildCost(t);
+		if(estimatedBuildCost > ai.GetUsableMoney()) {
+			HgLog.Info("FreightNetwork.FindTownDelivery: deferred estimatedBuildCost="
+				+ estimatedBuildCost + " usableMoney=" + ai.GetUsableMoney()
+				+ " " + t.explain);
+			return false;
+		}
 		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
 		if(builder == null) {
 			HgLog.Warning("FreightNetwork.FindTownDelivery: CreateBuilder returned null");
@@ -965,6 +972,13 @@ class FreightNetwork {
 						+ destPlace + "<=" + srcPlace
 						+ "[" + bestCandidate.cargo + "] dist:" + bestCandidate.dist
 				};
+				local estimatedBuildCost = ai.GetEstimatedBuildCost(t);
+				if(estimatedBuildCost > ai.GetUsableMoney()) {
+					HgLog.Info("FreightNetwork.FindSpine: deferred estimatedBuildCost="
+						+ estimatedBuildCost + " usableMoney=" + ai.GetUsableMoney()
+						+ " " + t.explain);
+					return false;
+				}
 				local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
 				if(builder == null) {
 					HgLog.Warning("FreightNetwork.FindSpine: CreateBuilder returned null");
@@ -1284,7 +1298,7 @@ class FreightNetwork {
 						+ " maxLoan=" + AICompany.GetMaxLoanAmount()
 						+ " currentLoan=" + AICompany.GetLoanAmount()
 						+ " quarterlyIncome=" + HogeAI.GetQuarterlyIncome(4));
-					if(HogeAI.Get().IsTooExpensive(estimatedCost)) {
+					if(estimatedCost > HogeAI.GetUsableMoney()) {
 						HgLog.Info("FreightNetwork.SearchAndConnect: deferred (cost " + estimatedCost + " too expensive)");
 						local deferred = FreightNetwork.availableJunctions[ji];
 						FreightNetwork.availableJunctions.remove(ji);
