@@ -103,6 +103,45 @@ class WaterRoute extends CommonRoute {
 		return src.GetCoasts(cargo)==null || dest.GetCoasts(cargo)==null ? [WaterRoute.IF_CANAL] : [WaterRoute.IF_SEA];
 	}
 
+	function IsRouteBuoy(tile) {
+		foreach(route in WaterRoute.instances) {
+			if(route.IsRemoved()) continue;
+			if(route.buoys == null) continue;
+			foreach(buoy in route.buoys) {
+				if(buoy == tile) return true;
+			}
+		}
+		return false;
+	}
+
+	function RemoveOwnedBuoy(tile) {
+		if(tile == null || !AIMap.IsValidTile(tile)) return false;
+		if(!AIMarine.IsBuoyTile(tile)) return false;
+		if(!AICompany.IsMine(AITile.GetOwner(tile))) return false;
+		if(WaterRoute.IsRouteBuoy(tile)) return false;
+		return AITile.DemolishTile(tile);
+	}
+
+	function RemoveOwnedWaterDepot(tile) {
+		if(tile == null || !AIMap.IsValidTile(tile)) return false;
+		if(!AIMarine.IsWaterDepotTile(tile)) return false;
+		if(!AICompany.IsMine(AITile.GetOwner(tile))) return false;
+		return BuildUtils.DemolishTileUntilFree(tile);
+	}
+
+	function RemoveOwnedBuoysAround(center, radius) {
+		if(center == null || !AIMap.IsValidTile(center)) return 0;
+		local removed = 0;
+		local cx = AIMap.GetTileX(center);
+		local cy = AIMap.GetTileY(center);
+		for(local x = max(1, cx - radius); x <= min(AIMap.GetMapSizeX() - 2, cx + radius); x++) {
+			for(local y = max(1, cy - radius); y <= min(AIMap.GetMapSizeY() - 2, cy + radius); y++) {
+				if(WaterRoute.RemoveOwnedBuoy(AIMap.GetTileIndex(x, y))) removed++;
+			}
+		}
+		return removed;
+	}
+
 
 	function GetRouteInfrastractureCost() {
 		if(!HogeAI.Get().IsInfrastructureMaintenance()) {
@@ -883,6 +922,9 @@ class WaterStation extends HgStation {
 	
 
 	function Demolish() {
+		WaterRoute.RemoveOwnedWaterDepot(depot);
+		WaterRoute.RemoveOwnedBuoysAround(platformTile, 4);
+		WaterRoute.RemoveOwnedBuoysAround(depot, 4);
 		AIMarine.RemoveDock(platformTile);
 		return true;
 	}
@@ -1201,6 +1243,13 @@ class CanalStation extends HgStation {
 	}
 	
 	function Demolish() {
+		WaterRoute.RemoveOwnedWaterDepot(depot);
+		foreach(x in [1,-1]) {
+			WaterRoute.RemoveOwnedWaterDepot(At(x,1));
+			WaterRoute.RemoveOwnedBuoy(At(x,0));
+			WaterRoute.RemoveOwnedBuoy(At(x,3));
+		}
+		WaterRoute.RemoveOwnedBuoysAround(platformTile, 3);
 		AIMarine.RemoveDock(platformTile);
 		foreach(t in [At(0,2),At(0,1)]) {
 			if(WaterRoute.usedTiles.rawin(t)) continue;
