@@ -2323,6 +2323,114 @@ class TrainRoute extends Route {
 	function GetRailType() {
 		return AIRail.GetRailType(srcHgStation.platformTile);
 	}
+
+	function CreateDepotNear(location) {
+		local result = CreateRescueDepotNear(location, null);
+		return result == null ? null : result.depot;
+	}
+
+	function CreateRescueDepotNear(location, triedDepots) {
+		local oldRailType = AIRail.GetCurrentRailType();
+		local railType = GetRailType();
+		if(railType == null) {
+			return null;
+		}
+		AIRail.SetCurrentRailType(railType);
+		local radius = 8;
+		local best = AIList();
+		local centerX = AIMap.GetTileX(location);
+		local centerY = AIMap.GetTileY(location);
+		local minX = max(1, centerX - radius);
+		local maxX = min(AIMap.GetMapSizeX() - 2, centerX + radius);
+		local minY = max(1, centerY - radius);
+		local maxY = min(AIMap.GetMapSizeY() - 2, centerY + radius);
+		for(local x = minX; x <= maxX; x++) {
+			for(local y = minY; y <= maxY; y++) {
+				local tile = AIMap.GetTileIndex(x, y);
+				if(!AIRail.IsRailTile(tile)
+						|| !AICompany.IsMine(AITile.GetOwner(tile))
+						|| AIRail.GetRailType(tile) != railType) {
+					continue;
+				}
+				best.AddItem(tile, AIMap.DistanceManhattan(location, tile));
+			}
+		}
+		best.Sort(AIList.SORT_BY_VALUE, true);
+
+		local checked = 0;
+		foreach(front, distance in best) {
+			foreach(dir in HgTile.DIR4Index) {
+				local depotTile = front + dir;
+				if(!AITile.IsBuildable(depotTile)) {
+					continue;
+				}
+				local key = depotTile + "-" + front;
+				if(triedDepots != null && triedDepots.rawin(key)) {
+					continue;
+				}
+				if(triedDepots != null) {
+					triedDepots.rawset(key, true);
+				}
+				checked++;
+				local frontNeighbors = GetRescueDepotFrontNeighbors(front, depotTile, railType);
+				if(frontNeighbors.len() == 0) {
+					continue;
+				}
+				local from = frontNeighbors[0];
+				local to = frontNeighbors.len() >= 2 ? frontNeighbors[1] : frontNeighbors[0];
+				if(HgTile(front).BuildDepot(depotTile, from, to)) {
+					AIRail.SetCurrentRailType(oldRailType);
+					HgLog.Warning("TrainLostRescueDepot built depot:" + HgTile(depotTile)
+						+ " front:" + HgTile(front)
+						+ " from:" + HgTile(from)
+						+ " to:" + HgTile(to)
+						+ " distance:" + distance
+						+ " checked:" + checked
+						+ " " + this);
+					return {
+						depot = depotTile,
+						front = front,
+						from = from,
+						to = to,
+						distance = distance,
+						checked = checked,
+						exhausted = false
+					};
+				}
+			}
+		}
+		AIRail.SetCurrentRailType(oldRailType);
+		HgLog.Warning("TrainLostRescueDepot failed location:" + HgTile(location)
+			+ " railTiles:" + best.Count()
+			+ " checked:" + checked
+			+ " " + this);
+		return {
+			depot = null,
+			front = null,
+			distance = null,
+			checked = checked,
+			exhausted = true
+		};
+	}
+
+	function GetRescueDepotFrontNeighbors(front, depotTile, railType) {
+		local result = [];
+		foreach(dir in HgTile.DIR4Index) {
+			local neighbor = front + dir;
+			if(neighbor == depotTile || !AIMap.IsValidTile(neighbor)) {
+				continue;
+			}
+			if(!AITile.HasTransportType(neighbor, AITile.TRANSPORT_RAIL)
+					|| !AICompany.IsMine(AITile.GetOwner(neighbor))) {
+				continue;
+			}
+			if(AIRail.IsRailTile(neighbor) && AIRail.GetRailType(neighbor) != railType) {
+				continue;
+			}
+			result.push(neighbor);
+		}
+		return result;
+	}
 	
 	function GetAllTiles() {
 		local queue = [];

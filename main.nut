@@ -84,6 +84,7 @@ class HogeAI extends AIController {
 	lastScanRouteDates = null;
 	mountain = null;
 	noRouteCnadidates = null;
+	lostVehicleDiagnostics = null;
 	
 	yeti = null;
 	ecs = null;
@@ -263,6 +264,7 @@ class HogeAI extends AIController {
 		pendingConstructions = {};
 		lastScanRouteDates = {};
 		noRouteCnadidates = false;
+		lostVehicleDiagnostics = {};
 	}
 	
 	function Start() {
@@ -1320,7 +1322,9 @@ class HogeAI extends AIController {
 			}*/
 			
 
-			SearchAndBuildAdditionalDestAsFarAsPossible( route );
+			if(!IsNetworkMode()) {
+				SearchAndBuildAdditionalDestAsFarAsPossible( route );
+			}
 			CheckBuildReturnRoute(route, null, returnStats);
 			DoInterval();
 			
@@ -4027,6 +4031,7 @@ class HogeAI extends AIController {
 		
 		local execMode = AIExecMode();
 		CheckEvent();
+		CheckLostVehicleDiagnostics();
 		times.push(AIDate.GetCurrentDate()); //0
 		
 		CommonRoute.CheckOldVehicles();
@@ -4121,6 +4126,434 @@ class HogeAI extends AIController {
 		}
 	}
 
+	function GetVehicleStateText(vehicle) {
+		local state = AIVehicle.GetState(vehicle);
+		local stateText = "" + state;
+		if(state == AIVehicle.VS_RUNNING) {
+			stateText = "RUNNING";
+		} else if(state == AIVehicle.VS_AT_STATION) {
+			stateText = "AT_STATION";
+		} else if(state == AIVehicle.VS_CRASHED) {
+			stateText = "CRASHED";
+		} else if(AIVehicle.IsInDepot(vehicle)) {
+			stateText = "IN_DEPOT";
+		}
+		return stateText + "(" + state + ")";
+	}
+
+	function GetOrderDestinationText(vehicle, orderCount) {
+		if(orderCount <= 0) {
+			return "none";
+		}
+		local destination = AIOrder.GetOrderDestination(vehicle, AIOrder.ORDER_CURRENT);
+		return destination == null ? "null" : HgTile(destination);
+	}
+
+	function GetLostVehicleDiagnostic(vehicle, route, reason = null) {
+		if(!AIVehicle.IsValidVehicle(vehicle)) {
+			return "vehicle:" + vehicle + " invalid";
+		}
+		local orderCount = AIOrder.GetOrderCount(vehicle);
+		local orderIndex = orderCount <= 0 ? -1 : AIOrder.ResolveOrderPosition(vehicle, AIOrder.ORDER_CURRENT);
+		local orderFlags = orderCount <= 0 ? 0 : AIOrder.GetOrderFlags(vehicle, AIOrder.ORDER_CURRENT);
+		local location = AIVehicle.GetLocation(vehicle);
+		local routeNow = route != null ? route : Route.GetRouteByVehicle(vehicle);
+		return (reason == null ? "" : "reason:" + reason + " ")
+			+ "vehicle:" + vehicle
+			+ " name:" + AIVehicle.GetName(vehicle)
+			+ " tile:" + HgTile(location)
+			+ " speed:" + AIVehicle.GetCurrentSpeed(vehicle)
+			+ " state:" + GetVehicleStateText(vehicle)
+			+ " order:" + orderIndex + "/" + orderCount
+			+ " orderDest:" + GetOrderDestinationText(vehicle, orderCount)
+			+ " orderFlags:" + orderFlags
+			+ " route:" + (routeNow == null ? "null" : routeNow);
+	}
+
+	function AppendLostTrainSignalPath(paths, label, buildedPath) {
+		if(buildedPath != null && buildedPath.array_ != null && buildedPath.array_.len() >= 2) {
+			paths.push({label = label, path = buildedPath.array_});
+		}
+	}
+
+	function GetLostTrainSignalPaths(route) {
+		local paths = [];
+		if(route == null) {
+			return paths;
+		}
+		if(route instanceof TrainRoute) {
+			AppendLostTrainSignalPath(paths, "srcToDest", route.pathSrcToDest);
+			AppendLostTrainSignalPath(paths, "destToSrc", route.pathDestToSrc);
+			if(route.sharedRailPaths != null) {
+				foreach(i, path in route.sharedRailPaths) {
+					if(path != null && path.len() >= 2) {
+						paths.push({label = "shared" + i, path = path});
+					}
+				}
+			}
+		} else if(route instanceof TrainReturnRoute) {
+			AppendLostTrainSignalPath(paths, "srcArrival", route.srcArrivalPath);
+			AppendLostTrainSignalPath(paths, "srcDeparture", route.srcDeparturePath);
+			AppendLostTrainSignalPath(paths, "destArrival", route.destArrivalPath);
+			AppendLostTrainSignalPath(paths, "destDeparture", route.destDeparturePath);
+		}
+		return paths;
+	}
+
+	function GetSignalText(signalType) {
+		if(signalType == AIRail.SIGNALTYPE_NONE) {
+			return "none";
+		}
+		if(signalType == AIRail.SIGNALTYPE_NORMAL) {
+			return "normal";
+		}
+		if(signalType == AIRail.SIGNALTYPE_ENTRY) {
+			return "entry";
+		}
+		if(signalType == AIRail.SIGNALTYPE_EXIT) {
+			return "exit";
+		}
+		if(signalType == AIRail.SIGNALTYPE_COMBO) {
+			return "combo";
+		}
+		if(signalType == AIRail.SIGNALTYPE_PBS) {
+			return "pbs";
+		}
+		if(signalType == AIRail.SIGNALTYPE_PBS_ONEWAY) {
+			return "pbs_oneway";
+		}
+		return "" + signalType;
+	}
+
+	function GetLostTrainSignalScan(vehicle, route) {
+		if(route == null) {
+			return " route:null";
+		}
+		local paths = GetLostTrainSignalPaths(route);
+		if(paths.len() == 0) {
+			return " signalPath:none";
+		}
+		local location = AIVehicle.GetLocation(vehicle);
+		local best = null;
+		foreach(pathInfo in paths) {
+			foreach(i, tile in pathInfo.path) {
+				local distance = AIMap.DistanceManhattan(location, tile);
+				if(best == null || distance < best.distance) {
+					best = {label = pathInfo.label, path = pathInfo.path, index = i, distance = distance};
+					if(distance == 0) {
+						break;
+					}
+				}
+			}
+		}
+		if(best == null) {
+			return " signalPath:notFound";
+		}
+		local startIndex = max(1, best.index - 20);
+		local endIndex = min(best.path.len() - 2, best.index + 20);
+		local signals = [];
+		for(local i = startIndex; i <= endIndex; i++) {
+			local prev = best.path[i - 1];
+			local tile = best.path[i];
+			local next = best.path[i + 1];
+			if(!AIRail.IsRailTile(tile)) {
+				continue;
+			}
+			local forwardSignal = AIRail.SIGNALTYPE_NONE;
+			local backwardSignal = AIRail.SIGNALTYPE_NONE;
+			if(AIMap.DistanceManhattan(tile, next) == 1) {
+				forwardSignal = AIRail.GetSignalType(tile, next);
+			}
+			if(AIMap.DistanceManhattan(tile, prev) == 1) {
+				backwardSignal = AIRail.GetSignalType(tile, prev);
+			}
+			if(forwardSignal == AIRail.SIGNALTYPE_NONE && backwardSignal == AIRail.SIGNALTYPE_NONE) {
+				continue;
+			}
+			local flags = "";
+			if(backwardSignal != AIRail.SIGNALTYPE_NONE && forwardSignal == AIRail.SIGNALTYPE_NONE) {
+				flags = " opposite";
+			} else if(backwardSignal != AIRail.SIGNALTYPE_NONE && forwardSignal != AIRail.SIGNALTYPE_NONE) {
+				flags = " both";
+			}
+			signals.push("[" + i
+				+ " " + HgTile(tile)
+				+ " prev:" + HgTile(prev)
+				+ " next:" + HgTile(next)
+				+ " forward:" + GetSignalText(forwardSignal)
+				+ " backward:" + GetSignalText(backwardSignal)
+				+ flags + "]");
+		}
+		return " signalPath:" + best.label
+			+ " nearestIndex:" + best.index
+			+ " nearestDistance:" + best.distance
+			+ " window:" + startIndex + "-" + endIndex
+			+ " signals:" + (signals.len() == 0 ? "none" : HgArray(signals));
+	}
+
+	function RepairLostTrainWrongSignals(vehicle, route) {
+		if(!IsNetworkMode() || route == null) {
+			return 0;
+		}
+		local paths = GetLostTrainSignalPaths(route);
+		if(paths.len() == 0) {
+			return 0;
+		}
+		local location = AIVehicle.GetLocation(vehicle);
+		local best = null;
+		foreach(pathInfo in paths) {
+			foreach(i, tile in pathInfo.path) {
+				local distance = AIMap.DistanceManhattan(location, tile);
+				if(best == null || distance < best.distance) {
+					best = {label = pathInfo.label, path = pathInfo.path, index = i, distance = distance};
+					if(distance == 0) {
+						break;
+					}
+				}
+			}
+		}
+		if(best == null) {
+			return 0;
+		}
+
+		local repaired = 0;
+		local startIndex = max(1, best.index - 20);
+		local endIndex = min(best.path.len() - 2, best.index + 20);
+		for(local i = startIndex; i <= endIndex; i++) {
+			local prev = best.path[i - 1];
+			local tile = best.path[i];
+			local next = best.path[i + 1];
+			if(!AIRail.IsRailTile(tile)
+					|| AIMap.DistanceManhattan(tile, prev) != 1
+					|| AIMap.DistanceManhattan(tile, next) != 1) {
+				continue;
+			}
+			local forwardSignal = AIRail.GetSignalType(tile, next);
+			local backwardSignal = AIRail.GetSignalType(tile, prev);
+			if(forwardSignal != AIRail.SIGNALTYPE_NONE
+					|| backwardSignal != AIRail.SIGNALTYPE_PBS_ONEWAY) {
+				continue;
+			}
+
+			local removed = BuildUtils.RemoveSignalSafe(tile, prev);
+			local built = false;
+			if(removed) {
+				built = BuildUtils.BuildSignalSafe(tile, next, AIRail.SIGNALTYPE_PBS_ONEWAY);
+			}
+			if(built) {
+				repaired++;
+			}
+			HgLog.Warning("TrainLostSignalRepair tile:" + HgTile(tile)
+				+ " prev:" + HgTile(prev)
+				+ " next:" + HgTile(next)
+				+ " signalPath:" + best.label
+				+ " index:" + i
+				+ " removed:" + removed
+				+ " built:" + built
+				+ " vehicle:" + vehicle
+				+ " route:" + route);
+		}
+		return repaired;
+	}
+
+	function GetLostTrainLocalSignalScan(vehicle) {
+		local center = AIVehicle.GetLocation(vehicle);
+		local radius = 20;
+		local centerX = AIMap.GetTileX(center);
+		local centerY = AIMap.GetTileY(center);
+		local minX = max(1, centerX - radius);
+		local maxX = min(AIMap.GetMapSizeX() - 2, centerX + radius);
+		local minY = max(1, centerY - radius);
+		local maxY = min(AIMap.GetMapSizeY() - 2, centerY + radius);
+		local signals = [];
+		local railTiles = 0;
+		local dirs = [
+			[-1, 0],
+			[1, 0],
+			[0, -1],
+			[0, 1]
+		];
+		for(local x = minX; x <= maxX; x++) {
+			for(local y = minY; y <= maxY; y++) {
+				local tile = AIMap.GetTileIndex(x, y);
+				if(!AIRail.IsRailTile(tile)) {
+					continue;
+				}
+				railTiles++;
+				local tileSignals = [];
+				foreach(dir in dirs) {
+					local neighbor = AIMap.GetTileIndex(x + dir[0], y + dir[1]);
+					local signalType = AIRail.GetSignalType(tile, neighbor);
+					if(signalType != AIRail.SIGNALTYPE_NONE) {
+						tileSignals.push("to:" + HgTile(neighbor) + "=" + GetSignalText(signalType));
+					}
+				}
+				if(tileSignals.len() >= 1) {
+					signals.push("[" + HgTile(tile)
+						+ " dist:" + AIMap.DistanceManhattan(center, tile)
+						+ " tracks:" + AIRail.GetRailTracks(tile)
+						+ " " + HgArray(tileSignals) + "]");
+				}
+			}
+		}
+		return " center:" + HgTile(center)
+			+ " radius:" + radius
+			+ " railTiles:" + railTiles
+			+ " signals:" + (signals.len() == 0 ? "none" : HgArray(signals));
+	}
+
+	function TrackLostTrain(vehicle) {
+		if(lostVehicleDiagnostics == null) {
+			lostVehicleDiagnostics = {};
+		}
+		local tile = AIVehicle.GetLocation(vehicle);
+		if(lostVehicleDiagnostics.rawin(vehicle)) {
+			local diagnostic = lostVehicleDiagnostics.rawget(vehicle);
+			if(!diagnostic.rawin("eventTiles")) {
+				diagnostic.eventTiles <- [];
+			}
+			diagnostic.eventTiles.push(tile);
+			diagnostic.lastEventTile <- tile;
+			diagnostic.lastEventDate <- AIDate.GetCurrentDate();
+			HgLog.Warning("TrainLostDiag eventUpdate vehicle:" + vehicle
+				+ " eventTile:" + HgTile(tile)
+				+ " events:" + diagnostic.eventTiles.len()
+				+ " firstTile:" + (diagnostic.rawin("firstTile") ? HgTile(diagnostic.firstTile) : "null")
+				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			return;
+		}
+		lostVehicleDiagnostics.rawset(vehicle, {
+			firstDate = AIDate.GetCurrentDate(),
+			firstTile = tile,
+			eventTiles = [tile],
+			lastEventTile = tile,
+			lastEventDate = AIDate.GetCurrentDate(),
+			lastTile = tile,
+			lastLogDate = AIDate.GetCurrentDate()
+		});
+	}
+
+	function CheckLostVehicleDiagnostics() {
+		if(lostVehicleDiagnostics == null || lostVehicleDiagnostics.len() == 0) {
+			return;
+		}
+		local resolved = [];
+		foreach(vehicle, diagnostic in lostVehicleDiagnostics) {
+			if(!AIVehicle.IsValidVehicle(vehicle)) {
+				HgLog.Warning("TrainLostDiag resolved vehicle:" + vehicle + " invalid first:" + diagnostic.firstDate);
+				resolved.push(vehicle);
+				continue;
+			}
+			local tile = AIVehicle.GetLocation(vehicle);
+			local speed = AIVehicle.GetCurrentSpeed(vehicle);
+			local maxSpeed = AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(vehicle));
+			if(!diagnostic.rawin("firstTile")) {
+				diagnostic.firstTile <- diagnostic.rawin("lastTile") ? diagnostic.lastTile : tile;
+			}
+			local moved = diagnostic.rawin("lastTile") && diagnostic.lastTile != tile;
+			local movedFromLost = AIMap.DistanceManhattan(diagnostic.firstTile, tile);
+			local recovered = maxSpeed > 0 && speed * 4 > maxSpeed * 3 && movedFromLost > 20;
+			local reason = recovered ? "speed_recovered" : "still_lost";
+			HgLog.Warning("TrainLostDiag " + GetLostVehicleDiagnostic(vehicle, null, reason)
+				+ " maxSpeed:" + maxSpeed
+				+ " movedTile:" + moved
+				+ " firstTile:" + HgTile(diagnostic.firstTile)
+				+ " lastEventTile:" + (diagnostic.rawin("lastEventTile") ? HgTile(diagnostic.lastEventTile) : "null")
+				+ " events:" + (diagnostic.rawin("eventTiles") ? diagnostic.eventTiles.len() : 0)
+				+ " movedFromLost:" + movedFromLost
+				+ " first:" + diagnostic.firstDate
+				+ " days:" + (AIDate.GetCurrentDate() - diagnostic.firstDate));
+			local route = Route.GetRouteByVehicle(vehicle);
+			HgLog.Warning("TrainLostSignals vehicle:" + vehicle
+				+ GetLostTrainSignalScan(vehicle, route));
+			local repairedSignals = RepairLostTrainWrongSignals(vehicle, route);
+			if(repairedSignals > 0) {
+				HgLog.Warning("TrainLostSignalRepairSummary vehicle:" + vehicle
+					+ " repaired:" + repairedSignals
+					+ " route:" + route);
+			}
+			HgLog.Warning("TrainLostLocalSignals vehicle:" + vehicle
+				+ GetLostTrainLocalSignalScan(vehicle));
+			if(recovered) {
+				resolved.push(vehicle);
+			} else {
+				local daysLost = AIDate.GetCurrentDate() - diagnostic.firstDate;
+				if(daysLost >= 30 && route != null && route.GetVehicleType() == AIVehicle.VT_RAIL
+						&& "CreateRescueDepotNear" in route) {
+					CommonRoute.vehicleRemoving.rawset(vehicle, true);
+					if(!diagnostic.rawin("triedRescueDepots")) {
+						diagnostic.triedRescueDepots <- {};
+					}
+					local hasActiveRescueDepot = diagnostic.rawin("rescueDepot") && diagnostic.rescueDepot != null
+						&& diagnostic.rawin("rescueDepotDate");
+					if(hasActiveRescueDepot && AIVehicle.IsInDepot(vehicle)) {
+						local sent = AIVehicle.SendVehicleToDepot(vehicle);
+						HgLog.Warning("TrainLostRescueDepotInDepot vehicle:" + vehicle
+							+ " depot:" + HgTile(diagnostic.rescueDepot)
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " daysLost:" + daysLost
+							+ " route:" + route);
+					} else if(hasActiveRescueDepot && AIDate.GetCurrentDate() - diagnostic.rescueDepotDate >= 30) {
+						local depot = diagnostic.rescueDepot;
+						local removed = false;
+						if(AIRail.IsRailDepotTile(depot) && AICompany.IsMine(AITile.GetOwner(depot))) {
+							removed = HgTile(depot).RemoveDepot();
+						}
+						HgLog.Warning("TrainLostRescueDepotRetry vehicle:" + vehicle
+							+ " oldDepot:" + HgTile(depot)
+							+ " removed:" + removed
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " route:" + route);
+						diagnostic.rescueDepot = null;
+						diagnostic.rescueDepotFront = null;
+					} else if(hasActiveRescueDepot) {
+						local sent = AIVehicle.SendVehicleToDepot(vehicle);
+						HgLog.Warning("TrainLostRescueDepotIntervalSend vehicle:" + vehicle
+							+ " depot:" + HgTile(diagnostic.rescueDepot)
+							+ " front:" + (diagnostic.rawin("rescueDepotFront") && diagnostic.rescueDepotFront != null ? HgTile(diagnostic.rescueDepotFront) : "null")
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysSinceDepot:" + (AIDate.GetCurrentDate() - diagnostic.rescueDepotDate)
+							+ " daysLost:" + daysLost
+							+ " route:" + route);
+					}
+					if((!diagnostic.rawin("rescueDepot") || diagnostic.rescueDepot == null)
+							&& (!diagnostic.rawin("rescueExhausted") || !diagnostic.rescueExhausted)) {
+						local depotResult = route.CreateRescueDepotNear(tile, diagnostic.triedRescueDepots);
+						local depot = depotResult == null ? null : depotResult.depot;
+						local sent = false;
+						if(depot != null) {
+							diagnostic.rescueDepot <- depot;
+							diagnostic.rescueDepotFront <- depotResult.front;
+							diagnostic.rescueDepotDate <- AIDate.GetCurrentDate();
+							sent = AIVehicle.SendVehicleToDepot(vehicle);
+						} else {
+							diagnostic.rescueExhausted <- true;
+						}
+						HgLog.Warning("TrainLostRescueDepotSend vehicle:" + vehicle
+							+ " depot:" + (depot == null ? "null" : HgTile(depot))
+							+ " front:" + (depotResult == null || depotResult.front == null ? "null" : HgTile(depotResult.front))
+							+ " sent:" + sent
+							+ " err:" + AIError.GetLastErrorString()
+							+ " daysLost:" + daysLost
+							+ " checked:" + (depotResult == null ? "null" : depotResult.checked)
+							+ " exhausted:" + (depotResult == null ? true : depotResult.exhausted)
+							+ " tried:" + diagnostic.triedRescueDepots.len()
+							+ " route:" + route);
+					}
+				}
+				diagnostic.lastTile <- tile;
+				diagnostic.lastLogDate <- AIDate.GetCurrentDate();
+			}
+		}
+		foreach(vehicle in resolved) {
+			lostVehicleDiagnostics.rawdelete(vehicle);
+		}
+	}
+
 	function OnVehicleLost(event) {
 		local vehicle = event.GetVehicleID();
 		if(!AIVehicle.IsValidVehicle(vehicle)) {
@@ -4129,7 +4562,10 @@ class HogeAI extends AIController {
 		}
 		local vehicleType = AIVehicle.GetVehicleType(vehicle);
 		local route = Route.GetRouteByVehicle(vehicle);
-		HgLog.Warning("ET_VEHICLE_LOST:"+VehicleUtils.GetTypeName(vehicleType)+" "+ vehicle+" "+AIVehicle.GetName(vehicle)+" "+route);
+		HgLog.Warning("ET_VEHICLE_LOST:" + VehicleUtils.GetTypeName(vehicleType) + " " + GetLostVehicleDiagnostic(vehicle, route, "event"));
+		if(vehicleType == AIVehicle.VT_RAIL) {
+			TrackLostTrain(vehicle);
+		}
 		if(route != null) {
 			route.OnVehicleLost(vehicle);
 		} else {
@@ -4170,6 +4606,7 @@ class HogeAI extends AIController {
 		table.cargoVtDistanceValues <- cargoVtDistanceValues;
 		table.lastTransferCandidates <- lastTransferCandidates;
 		table.lastScanRouteDates <- lastScanRouteDates;
+		table.lostVehicleDiagnostics <- lostVehicleDiagnostics;
 		Place.SaveStatics(table);
 
 		HgLog.Info("Place.SaveStatics consume ops:"+(remainOps - AIController.GetOpsTillSuspend()));
@@ -4275,6 +4712,9 @@ class HogeAI extends AIController {
 			lastTransferCandidates = loadData.lastTransferCandidates;
 		}
 		lastScanRouteDates = loadData.lastScanRouteDates;
+		if(loadData.rawin("lostVehicleDiagnostics")) {
+			lostVehicleDiagnostics = loadData.lostVehicleDiagnostics;
+		}
 		Place.LoadStatics(loadData);
 		HgStation.LoadStatics(loadData);
 		TrainInfoDictionary.LoadStatics(loadData);
