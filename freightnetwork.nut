@@ -45,8 +45,10 @@ class FreightNetwork {
 			FreightNetwork.ActivateAvailableJunctionNetwork();
 		}
 		if(FreightNetwork.state.destIndustry == null) {
-			local built = FreightNetwork.FindSpine();
-			if(built) FreightNetwork.BuildJunctions();
+			if(!FreightNetwork.FindTownDelivery()) {
+				local built = FreightNetwork.FindSpine();
+				if(built) FreightNetwork.BuildJunctions();
+			}
 		} else {
 			local connected = FreightNetwork.SearchAndConnect();
 			if(connected) {
@@ -59,6 +61,189 @@ class FreightNetwork {
 				FreightNetwork.state.networkId++;
 			}
 		}
+	}
+
+	function FreightNetwork::GetRouteEndpointIndustry(route, isSrc) {
+		local station = isSrc ? route.srcHgStation : route.destHgStation;
+		if(station == null || station.place == null) return -1;
+		if(!(station.place instanceof HgIndustry)) return -1;
+		if(!AIIndustry.IsValidIndustry(station.place.industry)) return -1;
+		return station.place.industry;
+	}
+
+	function FreightNetwork::GetConnectedIndustries() {
+		local connected = {};
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsRemoved()) continue;
+			if(route.IsClosed()) continue;
+			if(CargoUtils.IsPaxOrMail(route.cargo)) continue;
+			local srcIndustry = FreightNetwork.GetRouteEndpointIndustry(route, true);
+			if(srcIndustry != -1) connected.rawset(srcIndustry, true);
+			local destIndustry = FreightNetwork.GetRouteEndpointIndustry(route, false);
+			if(destIndustry != -1) connected.rawset(destIndustry, true);
+		}
+		return connected;
+	}
+
+	function FreightNetwork::HasTownDeliveryForSource(srcIndustry) {
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsRemoved()) continue;
+			if(route.IsClosed()) continue;
+			if(route.srcHgStation == null || route.destHgStation == null) continue;
+			if(route.srcHgStation.place == null || route.destHgStation.place == null) continue;
+			if(!(route.srcHgStation.place instanceof HgIndustry)) continue;
+			if(route.srcHgStation.place.industry != srcIndustry) continue;
+			if(route.destHgStation.place instanceof TownCargo) return true;
+		}
+		return false;
+	}
+
+	function FreightNetwork::GetInboundFreightRouteCount(destIndustry) {
+		local count = 0;
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsRemoved()) continue;
+			if(route.IsClosed()) continue;
+			if(CargoUtils.IsPaxOrMail(route.cargo)) continue;
+			if(FreightNetwork.GetRouteEndpointIndustry(route, false) == destIndustry) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	function FreightNetwork::IsTownAcceptingCargo(town, cargo) {
+		local population = AITown.GetPopulation(town);
+		local townEffect = AICargo.GetTownEffect(cargo);
+		if(townEffect == AICargo.TE_GOODS && population < 1200) return false;
+		local radius = TownCargo.GetRadiusPopulation(population);
+		return AITile.GetCargoAcceptance(AITown.GetLocation(town), cargo, 1, 1, radius) >= 8;
+	}
+
+	function FreightNetwork::HasOtherCompanyStationAroundIndustry(industry) {
+		if(!AIIndustry.IsValidIndustry(industry)) return false;
+		if(AIIndustry.GetAmountOfStationsAround(industry) < 1) return false;
+		local tileList = AITileList_IndustryAccepting(industry, 5);
+		tileList.Valuate(AITile.IsStationTile);
+		tileList.RemoveValue(0);
+		tileList.Valuate(AITile.GetOwner);
+		tileList.RemoveValue(AICompany.ResolveCompanyID(AICompany.COMPANY_SELF));
+		return tileList.Count() >= 1;
+	}
+
+	function FreightNetwork::CanUseTownDeliverySource(srcPlace) {
+		if(!HogeAI.Get().IsAvoidSecondaryIndustryStealing()) return true;
+		if(!(srcPlace instanceof HgIndustry)) return true;
+		if(!srcPlace.IsProcessing()) return true;
+		if(!FreightNetwork.HasOtherCompanyStationAroundIndustry(srcPlace.industry)) return true;
+		HgLog.Info("FreightNetwork.FindTownDelivery: skip source for secondary stealing "
+			+ srcPlace.GetName());
+		return false;
+	}
+
+	function FreightNetwork::MaybeUseTownDeliveryCandidate(best, srcPlace, destPlace, cargo, vehicleType, routeClass, production) {
+		if(routeClass.IsTooManyVehiclesForNewRoute(routeClass)) return best;
+		if(!FreightNetwork.CanUseTownDeliverySource(srcPlace)) return best;
+		if(Place.IsNgPlace(srcPlace, cargo, vehicleType) || Place.IsNgPlace(destPlace, cargo, vehicleType)) return best;
+		if(vehicleType == AIVehicle.VT_RAIL && !HgTile.IsLandConnectedForRail(srcPlace.GetLocation(), destPlace.GetLocation())) return best;
+		if(vehicleType == AIVehicle.VT_ROAD && !HgTile.IsLandConnectedForRoad(srcPlace.GetLocation(), destPlace.GetLocation())) return best;
+		if(vehicleType == AIVehicle.VT_AIR && !destPlace.CanBuildAirport(Air.Get().GetMinimumAiportType(), cargo)) return best;
+		if(vehicleType == AIVehicle.VT_WATER && !WaterRoute.CanBuild(srcPlace, destPlace, cargo, false)) return best;
+
+		local dist = AIMap.DistanceManhattan(srcPlace.GetLocation(), destPlace.GetLocation());
+		if(dist < 20) return best;
+		local infraTypes = routeClass.GetSuitableInfrastractureTypes(srcPlace, destPlace, cargo);
+		local estimate = Route.Estimate(vehicleType, cargo, dist, production, false, infraTypes);
+		if(estimate == null || estimate.value <= 0) return best;
+		local score = estimate.value;
+		if(best != null && best.score >= score) return best;
+		return {
+			src = srcPlace,
+			dest = destPlace,
+			cargo = cargo,
+			vehicleType = vehicleType,
+			routeClass = routeClass,
+			estimate = estimate,
+			score = score,
+			production = production,
+			distance = dist
+		};
+	}
+
+	function FreightNetwork::FindTownDelivery() {
+		local ai = HogeAI.Get();
+		local connectedIndustries = FreightNetwork.GetConnectedIndustries();
+		if(connectedIndustries.len() == 0) return false;
+
+		local bestCandidate = null;
+		foreach(srcIndustry, _ in connectedIndustries) {
+			if(FreightNetwork.HasTownDeliveryForSource(srcIndustry)) continue;
+			if(FreightNetwork.GetInboundFreightRouteCount(srcIndustry) < 3) continue;
+			local srcType = AIIndustry.GetIndustryType(srcIndustry);
+			local srcPlace = HgIndustry(srcIndustry, true);
+			foreach(cargo, _ in AIIndustryType.GetProducedCargo(srcType)) {
+				if(CargoUtils.IsPaxOrMail(cargo)) continue;
+				if(!Place.IsAcceptedByTown(cargo)) continue;
+				local production = AIIndustry.GetLastMonthProduction(srcIndustry, cargo);
+				if(AIIndustryType.IsProcessingIndustry(srcType)) {
+					if(production <= 0) continue;
+				} else if(production <= 0) {
+					production = 80;
+				}
+				production = min(production, 550);
+				foreach(town, _ in AITownList()) {
+					if(!FreightNetwork.IsTownAcceptingCargo(town, cargo)) continue;
+					local destPlace = TownCargo(town, cargo, false);
+					local pairKey = srcIndustry + "-town-" + town + "-" + cargo;
+					if(FreightNetwork.failedPairs.rawin(pairKey)) continue;
+					foreach(routeClass in [TrainRoute, RoadRoute, WaterRoute, AirRoute]) {
+						bestCandidate = FreightNetwork.MaybeUseTownDeliveryCandidate(bestCandidate,
+							srcPlace, destPlace, cargo, routeClass.GetVehicleType(), routeClass, production);
+					}
+				}
+			}
+		}
+
+		if(bestCandidate == null) return false;
+		HgLog.Info("FreightNetwork.FindTownDelivery: selected src=" + bestCandidate.src.GetName()
+			+ " dest=" + bestCandidate.dest.GetName()
+			+ " cargo=" + AICargo.GetName(bestCandidate.cargo)
+			+ " mode=" + bestCandidate.routeClass.GetLabel()
+			+ " score=" + bestCandidate.score
+			+ " dist=" + bestCandidate.distance);
+
+		local t = {
+			src = bestCandidate.src,
+			dest = bestCandidate.dest,
+			cargo = bestCandidate.cargo,
+			vehicleType = bestCandidate.vehicleType,
+			estimate = bestCandidate.estimate,
+			score = bestCandidate.score,
+			isBiDirectional = false,
+			allowNetworkSourceReuse = true,
+			canChangeDest = false,
+			notUseSingle = true,
+			requireFirstVehicle = true,
+			explain = "FreightNetworkTownDelivery " + bestCandidate.routeClass.GetLabel() + " "
+				+ bestCandidate.dest + "<=" + bestCandidate.src
+				+ "[" + AICargo.GetName(bestCandidate.cargo) + "] dist:" + bestCandidate.distance
+		};
+		local builder = ai.CreateBuilder(t, [], {}, AIDate.GetCurrentDate() + 600);
+		if(builder == null) {
+			HgLog.Warning("FreightNetwork.FindTownDelivery: CreateBuilder returned null");
+			return false;
+		}
+		local newRoutes = builder.Build();
+		if(newRoutes == null) newRoutes = [];
+		if(typeof newRoutes != "array") newRoutes = [newRoutes];
+		if(newRoutes.len() == 0) {
+			local srcIndustry = bestCandidate.src.industry;
+			local pairKey = srcIndustry + "-town-" + bestCandidate.dest.town + "-" + bestCandidate.cargo;
+			FreightNetwork.failedPairs.rawset(pairKey, true);
+			HgLog.Warning("FreightNetwork.FindTownDelivery: Build failed, blacklisting pair " + pairKey);
+			return false;
+		}
+		HgLog.Info("FreightNetwork.FindTownDelivery: built point-to-point " + newRoutes[0]);
+		return true;
 	}
 
 	function FreightNetwork::SaveStatics(table) {
