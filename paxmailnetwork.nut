@@ -751,6 +751,14 @@ class PaxMailNetwork {
 	function PaxMailNetwork::Step() {
 		local ai = HogeAI.Get();
 		if(ai.IsFreightOnly()) return;
+		if(!ai.IsPaxMailOnly()) {
+			local liveFreightRoutes = ai.CountLiveFreightRoutes();
+			if(liveFreightRoutes < 4) {
+				HgLog.Info("PaxMailNetwork.BootstrapSkip liveFreightRoutes:"+liveFreightRoutes+" required:4");
+				return;
+			}
+			HgLog.Info("PaxMailNetwork.BootstrapComplete liveFreightRoutes:"+liveFreightRoutes+" required:4");
+		}
 		HgLog.Info("###### ConnectUnservedTowns");
 		if(ai.GetUsableMoney() < ai.GetInflatedMoney(100000)) return;
 

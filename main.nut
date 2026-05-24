@@ -4891,6 +4891,16 @@ class HogeAI extends AIController {
 		local estimatedBuildCost = GetEstimatedBuildCost(plan);
 		return estimatedBuildCost <= 0 || GetUsableMoney() >= estimatedBuildCost;
 	}
+
+	function CountLiveFreightRoutes() {
+		local result = 0;
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsClosed() || route.IsRemoved()) continue;
+			if(CargoUtils.IsPaxOrMail(route.cargo)) continue;
+			result++;
+		}
+		return result;
+	}
 	
 	function HasIncome(money) {
 		return HogeAI.GetQuarterlyIncome() >= HogeAI.GetInflatedMoney(money);
