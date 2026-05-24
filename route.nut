@@ -4765,6 +4765,14 @@ class CommonRouteBuilder extends RouteBuilder {
 	}
 	
 	function CheckTownTransferCargo(route, station, cargo) {
+		if(HogeAI.Get().IsNetworkMode()
+				&& station.feederTargetSg != null
+				&& station.place != null
+				&& station.place instanceof TownCargo
+				&& route.HasCargo(cargo)) {
+			TownBus.CreateFeederRoute(station, station.feederTargetSg);
+			station.feederTargetSg = null;
+		}
 		if(HogeAI.Get().IsNetworkMode() && !HogeAI.Get().IsAvoidExtendCoverageAreaInTowns()) {
 			return;
 		}

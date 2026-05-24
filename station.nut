@@ -908,9 +908,9 @@ class StationFactory {
 					HgLog.Info("PhysJoin: "+GetTypeName()+" at "+place.GetName()+" shares station ID with "+existingSg.GetName());
 					result = joinResult;
 				} else {
-					HgLog.Info("PhysJoin: "+GetTypeName()+" at "+place.GetName()+" cannot join "+existingSg.GetName()+" (spread limit) - feeder bus will be created.");
+					HgLog.Info("PhysJoin: "+GetTypeName()+" at "+place.GetName()+" cannot join "+existingSg.GetName()+" (spread limit) - feeder bus will be created after route build succeeds.");
 					if(result != null) {
-						result.feederTargetSg = existingSg; // BuildExec() will create a bidirectional feeder bus
+						result.feederTargetSg = existingSg;
 					}
 				}
 			}
@@ -1909,7 +1909,7 @@ class HgStation {
 	pieceStationTile = null;
 	platformRectangle = null;
 	usingRoutes = null;
-	feederTargetSg = null; // when set, BuildExec() creates a bidirectional feeder bus to this existing station group
+	feederTargetSg = null; // when set, successful route post-build creates a feeder bus to this existing station group
 	fallbackCandidates = null; // additional TestMode-passing candidates to try in BuildExec if the primary fails
 	
 	constructor(platformTile, stationDirection) {
@@ -2336,11 +2336,9 @@ class HgStation {
 	function BuildExec() {
 		local execMode = AIExecMode();
 		local isTownPlace = false;
-		local isForTownPaxMail = false;
 		if(!(this instanceof PieceStation)) {
 			isTownPlace = place != null && cargo != null && place instanceof TownCargo;
-			isForTownPaxMail = isTownPlace && CargoUtils.IsPaxOrMail(cargo);
-			if(!HogeAI.Get().IsNetworkMode() || isForTownPaxMail) {
+			if(!HogeAI.Get().IsNetworkMode()) {
 				CheckBuildTownBus();
 			}
 		}
@@ -2389,13 +2387,6 @@ class HgStation {
 		foreach(corner in GetPlatformRectangle().GetCorners()) { 
 			HgStation.townUsed.rawset(AITile.GetTownAuthority(corner.tile),true); // TODO: 消えても残る
 		}
-
-		// Feeder bus: when physical station joining failed (spread limit), create a
-		// bidirectional bus/truck route connecting this new station to the existing one.
-		if(HogeAI.Get().IsNetworkMode() && feederTargetSg != null && place != null && place instanceof TownCargo) {
-			TownBus.CreateFeederRoute(this, feederTargetSg);
-			feederTargetSg = null;
-		}		
 
 		return true;
 	}
