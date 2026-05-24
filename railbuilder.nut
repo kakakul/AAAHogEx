@@ -3691,6 +3691,33 @@ class RightDivergeJunction {
 // a LeftDivergeJunction and RightDivergeJunction independently at each.
 // The two junction types can succeed or fail independently at a given location.
 class FourWayJunction {
+	static function _IsLeftHandSide(pathDx, pathDy, parallelOffX, parallelOffY) {
+		local rightX = -pathDy;
+		local rightY = pathDx;
+		return parallelOffX == rightX && parallelOffY == rightY;
+	}
+
+	static function _HasInvertedOneWaySignal(pathTiles, startIndex, endIndex) {
+		local start = max(1, startIndex);
+		local end = min(pathTiles.len() - 2, endIndex);
+		for(local i = start; i <= end; i++) {
+			local prev = pathTiles[i - 1];
+			local tile = pathTiles[i];
+			local next = pathTiles[i + 1];
+			if(AIMap.DistanceManhattan(prev, tile) != 1
+					|| AIMap.DistanceManhattan(tile, next) != 1) {
+				continue;
+			}
+			local forwardSignal = AIRail.GetSignalType(tile, next);
+			local backwardSignal = AIRail.GetSignalType(tile, prev);
+			if(forwardSignal == AIRail.SIGNALTYPE_NONE
+					&& backwardSignal == AIRail.SIGNALTYPE_PBS_ONEWAY) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// Scan mainTiles[minDist..maxDist] for a 5-tile window that is:
 	//   (a) straight N-S with consistent direction across all 5 tiles, and
 	//   (b) running side-by-side with parallelTiles at a consistent x-offset,
@@ -3782,6 +3809,22 @@ class FourWayJunction {
 				}
 
 				if(parallelOk) {
+					local parallelOffX = offset * offX;
+					local parallelOffY = offset * offY;
+					if(FourWayJunction._IsLeftHandSide(dx, dy, parallelOffX, parallelOffY)) {
+						HgLog.Warning("FourWayJunction.Try: skipped inverted straight tracks at i=" + i
+							+ " main=" + HgTile(m1)
+							+ " parallelOffX=" + parallelOffX
+							+ " parallelOffY=" + parallelOffY
+							+ " dx=" + dx
+							+ " dy=" + dy);
+						continue;
+					}
+					if(FourWayJunction._HasInvertedOneWaySignal(mainTiles, i - 2, i + 3)) {
+						HgLog.Warning("FourWayJunction.Try: skipped inverted straight signals at i=" + i
+							+ " main=" + HgTile(m1));
+						continue;
+					}
 					// All 5 main tiles and their parallel counterparts must be level
 					local levelOk = true;
 					local baseHeight = AITile.GetMinHeight(m1);
@@ -3903,6 +3946,18 @@ class FourWayJunction {
 				local dDy = diagWindow.diagDy;
 				local pOffX = diagWindow.parallelOffX;
 				local pOffY = diagWindow.parallelOffY;
+				if(FourWayJunction._IsLeftHandSide(dDx, dDy, pOffX, pOffY)) {
+					HgLog.Warning("FourWayJunction.Try diagonal: skipped inverted tracks at i=" + i
+						+ " origin=" + HgTile(origin)
+						+ " diagDx=" + dDx + " diagDy=" + dDy
+						+ " pOffX=" + pOffX + " pOffY=" + pOffY);
+					continue;
+				}
+				if(FourWayJunction._HasInvertedOneWaySignal(mainTiles, i - 6, i + 7)) {
+					HgLog.Warning("FourWayJunction.Try diagonal: skipped inverted signals at i=" + i
+						+ " origin=" + HgTile(origin));
+					continue;
+				}
 
 				// Four orientation combos to try for right and left diagonal junctions.
 				HgLog.Info("FourWayJunction.Try diagonal: i=" + i + " origin=" + HgTile(origin)
