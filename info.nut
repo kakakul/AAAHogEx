@@ -1,11 +1,11 @@
 ﻿class HogeAI extends AIInfo {
 
    function GetAuthor()      { return "kakakul"; }
-   function GetName()        { return "HogNet"; }
-   function GetDescription() { return "HogNet was forked from AAAHogEx, retaining most of the logic, but forcing the AI to build a single large network and connecting all towns no matter how small. It supports various types of transportation, including trains, trams, cars, trucks, ships, and airplanes."; }
-   function GetVersion()     { return 3; }	// also change in main.nut
-   function MinVersionToLoad() { return 2; }
-   function GetDate()        { return "2026-03-30"; }
+   function GetName()        { return "AAAHogNet"; }
+   function GetDescription() { return "HogNet is a fork of AAAHogEx. HogNet changes the core objective away from profit maximisation: the AI tries to connect towns into a single large network, using a hub-and-spoke strategy. For industries, the AI tries to reuse infrastructure as much as possible, using a spine-and-branch strategy."; }
+   function GetVersion()     { return 4; }	// also change in main.nut
+   function MinVersionToLoad() { return 4; }
+   function GetDate()        { return "2026-05-25"; }
    function CreateInstance() { return "HogeAI"; }
    function GetShortName()   { return "HOGN"; }
    function GetAPIVersion()    { return "14"; }
