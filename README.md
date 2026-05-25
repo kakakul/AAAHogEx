@@ -1,7 +1,7 @@
 # HogNet OpenTTD AI
 
 ## Overview
-HogNet is a fork of AAAHogEx. The original AAAHogEx is designed to maximise profit — it builds routes between towns that earn money and may leave small or isolated towns unserved indefinitely. HogNet changes the core objective: the AI works toward a single large network that eventually connects every town on the map, no matter how small or unprofitable.
+HogNet is a fork of AAAHogEx. The original AAAHogEx is designed to maximise profit — it builds point-to-point routes between towns and industries that earn the most money. HogNet changes the core objective: the AI tries to connect towns into a single large network, using a hub-and-spoke strategy. For industries, the AI tries to reuse infrastructure as much as possible, using a spine-and-branch strategy. 
 
 ## Pax and Mail Network Building
 **Hub and Spoke**
@@ -14,11 +14,11 @@ In AAAHogEx, the AI may build profitable routes in completely separate parts of 
 When the AI builds a second station inside a town that already has a station, it now creates a short feeder service connecting the two stops within the town. This allows cargo and passengers to move between stations in the same town before being forwarded on longer-distance routes.
 
 ## Freight Cargo Handling
-**Freight industries are connected into growing rail networks**
-HogNet can build freight routes as part of its wider network strategy. It starts with a strong rail connection between a producing industry and an accepting industry, then expands from that line by adding new branches to nearby compatible producers. Instead of creating many isolated point-to-point freight lines, freight service grows outward from shared rail infrastructure, including a shared main line.
+**Spine and Branch**
+The AI starts with a strong rail connection between a producing industry and an accepting industry, then expands from that line by adding new branches to nearby compatible producers. Instead of creating many isolated point-to-point freight lines, freight service grows outward from shared rail infrastructure, including a shared main line. Though once branches are exhausted, a new spine will be built.
 
 **Road feeders collect nearby cargo**
-If smaller or nearby industries can provide cargo accepted by the active freight destination, HogNet can add road feeder routes into the freight rail station. These feeders help pull more cargo into the rail network without requiring every industry to get its own long-distance railway immediately.
+If smaller or nearby industries can provide cargo accepted by the active freight destination, the AI can add road feeder routes into the freight rail station. These feeders help pull more cargo into the rail network without requiring every industry to get its own long-distance railway immediately.
 
 ## Other Changes
 **Vehicle Buy/Sell Logic**
