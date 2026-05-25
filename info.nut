@@ -91,14 +91,14 @@
 			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 
-		// AddSetting({name = "IsAvoidExtendCoverageAreaInTowns",
-		// 	description = "Avoid joining stations solely to extend coverage area in towns",
-		// 	//default_value = 0,
-		// 	easy_value = 1,
-		// 	medium_value = 0,
-		// 	hard_value = 0,
-		// 	custom_value = 0,
-		// 	flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
+		AddSetting({name = "IsAvoidExtendCoverageAreaInTowns",
+			description = "Avoid joining stations solely to extend coverage area in towns",
+			//default_value = 0,
+			easy_value = 0,
+			medium_value = 0,
+			hard_value = 0,
+			custom_value = 0,
+			flags = AICONFIG_BOOLEAN + CONFIG_INGAME});
 
 		AddSetting({name = "IsPreferReusingExistingRoads",
 			description = "Prefer reusing existing roads. Before building new roads, the AI checks whether existing roads can be used. This helps prevent the map from becoming cluttered with too many roads.",
