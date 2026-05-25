@@ -679,13 +679,22 @@ class Route {
 	}
 
 	function GetNetworkCapacityBuyLimit() {
-		if(!HogeAI.Get().IsNetworkMode() || !CargoUtils.IsPaxOrMail(cargo)) return null;
+		if(!HogeAI.Get().IsNetworkMode()) return null;
 		local vehicleType = GetVehicleType();
-		if(vehicleType == AIVehicle.VT_ROAD) return 6;
+		if(vehicleType == AIVehicle.VT_ROAD) {
+			return CargoUtils.IsPaxOrMail(cargo) || IsNetworkFreightRoadCapacityMode() ? 6 : null;
+		}
+		if(!CargoUtils.IsPaxOrMail(cargo)) return null;
 		if(vehicleType == AIVehicle.VT_RAIL) return 2;
 		if(vehicleType == AIVehicle.VT_WATER) return 4;
 		if(vehicleType == AIVehicle.VT_AIR) return 1;
 		return null;
+	}
+
+	function IsNetworkFreightRoadCapacityMode() {
+		return HogeAI.Get().IsNetworkMode()
+				&& GetVehicleType() == AIVehicle.VT_ROAD
+				&& !CargoUtils.IsPaxOrMail(cargo);
 	}
 
 	function GetRouteWaitingPressure(cargo) {
@@ -2032,9 +2041,6 @@ class CommonRoute extends Route {
 	}
 
 	static function CheckOldVehicles() {
-		if(!HogeAI.Get().IsEnableVehicleBreakdowns()) {
-			return;
-		}
 		if(AIDate.GetMonth(AIDate.GetCurrentDate()) < 10) {
 			return;
 		}
@@ -2042,17 +2048,35 @@ class CommonRoute extends Route {
 			return;
 		}
 		CommonRoute.checkReducedDate.rawset("oldVehicles", AIDate.GetCurrentDate());
+		if(!HogeAI.Get().IsEnableVehicleBreakdowns()) {
+			HgLog.Info("CommonRouteOldVehicleReplaceSkip reason:breakdowns_disabled");
+			return;
+		}
 		
 		local execMode = AIExecMode();
 		local vehicleList = AIVehicleList();
 		vehicleList.Valuate( AIVehicle.GetAgeLeft );
 		vehicleList.KeepBelowValue( 600 );
+		local checked = 0;
+		local marked = 0;
 		foreach(v,_ in vehicleList) {
 			if(AIVehicle.GetVehicleType(v) == AIVehicle.VT_RAIL) continue;
+			checked++;
 			local group = AIVehicle.GetGroupID(v);
 			if(Route.groupRoute.rawin(group)) {
-				Route.groupRoute[group].AppendRemoveOrder(v);
+				local route = Route.groupRoute[group];
+				local sent = route.AppendRemoveOrder(v);
+				marked++;
+				HgLog.Info("CommonRouteOldVehicleReplace vt:"+AIVehicle.GetVehicleType(v)
+						+" vehicle:"+AIVehicle.GetName(v)
+						+" ageLeft:"+AIVehicle.GetAgeLeft(v)
+						+" sent:"+sent
+						+route.GetTraceLogPart()
+						+" "+route);
 			}
+		}
+		if(marked > 0) {
+			HgLog.Info("CommonRouteOldVehicleReplaceSummary checked:"+checked+" marked:"+marked);
 		}
 	}
 	
@@ -3589,6 +3613,8 @@ class CommonRoute extends Route {
 					}
 					if(waitingPressure != null && waitingPressure.enabled) {
 						buildNum = min(buildNum, max(1, waitingPressure.requiredVehicles - vehicleList.Count()));
+					} else if(IsNetworkFreightRoadCapacityMode() && capacityState != null) {
+						buildNum = max(0, capacityState.targetVehicles - vehicleList.Count());
 					}
 					buildNum = min(maxVehicles - vehicles.Count(), buildNum) - firstBuild;
 					local buyLimit = GetNetworkCapacityBuyLimit();
@@ -3670,6 +3696,24 @@ class CommonRoute extends Route {
 			CloneVehicle(vehicle);
 		}
 		return vehicle;
+	}
+
+	function BuildInitialNetworkFreightRoadVehicles(vehicle, maxInitialVehicles) {
+		if(vehicle == null || maxInitialVehicles <= 2 || !IsNetworkFreightRoadCapacityMode()) return;
+		local state = GetNetworkCapacityState(cargo);
+		local targetVehicles = min(state.targetVehicles, maxInitialVehicles);
+		local currentVehicles = GetVehicleList().Count();
+		local buildNum = max(0, targetVehicles - currentVehicles);
+		local buyLimit = GetNetworkCapacityBuyLimit();
+		if(buyLimit != null) buildNum = min(buildNum, buyLimit);
+		HgLog.Info("NetworkFreightRoadInitialVehicles current:"+currentVehicles
+				+" target:"+state.targetVehicles
+				+" initialTarget:"+targetVehicles
+				+" build:"+buildNum
+				+" "+this);
+		for(local i = 0; i < buildNum; i++) {
+			if(CloneVehicle(vehicle) == null) break;
+		}
 	}
 	
 	function SellVehicle(vehicle) {
@@ -4716,12 +4760,14 @@ class CommonRouteBuilder extends RouteBuilder {
 			route.instances.push(route); // ChooseEngine内、インフラコスト計算に必要
 			if(!isWaitingProduction && !isWaitingDestRoute) {
 				local requireFirstVehicle = GetOption("requireFirstVehicle", false);
-				if(route.BuildVehicleFirst() == null && (HogeAI.Get().IsInfrastructureMaintenance() || requireFirstVehicle)) {
+				local firstVehicle = route.BuildVehicleFirst();
+				if(firstVehicle == null && (HogeAI.Get().IsInfrastructureMaintenance() || requireFirstVehicle)) {
 					HgLog.Warning("route Remove.(route.BuildVehicleFirst() == null)"+route.GetTraceLogPart()+" "+route);
 					route.isBuilding = false;
 					route.Remove();
 					return null;
 				}
+				route.BuildInitialNetworkFreightRoadVehicles(firstVehicle, GetOption("freightNetworkInitialRoadVehicles", 0));
 			} else {
 				route.SetLatestEngineSet(engineSet);
 			}

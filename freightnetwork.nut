@@ -223,6 +223,7 @@ class FreightNetwork {
 			canChangeDest = false,
 			notUseSingle = true,
 			requireFirstVehicle = true,
+			freightNetworkInitialRoadVehicles = 8,
 			explain = "FreightNetworkTownDelivery " + bestCandidate.routeClass.GetLabel() + " "
 				+ bestCandidate.dest + "<=" + bestCandidate.src
 				+ "[" + AICargo.GetName(bestCandidate.cargo) + "] dist:" + bestCandidate.distance
@@ -813,7 +814,9 @@ class FreightNetwork {
 			foreach(cargo in batchCargos) {
 				local src = HgIndustry(feeder.srcIndustry, true);
 				local isDestFeeder = feeder.rawin("isDestFeeder") && feeder.isDestFeeder;
-				local builderOpts = isDestFeeder ? {transfer = false} : {};	// set transfer false, or route builder will give transfer orders instead of unload orders
+				local builderOpts = isDestFeeder
+					? {transfer = false, freightNetworkInitialRoadVehicles = 8}
+					: {freightNetworkInitialRoadVehicles = 8};	// set transfer false, or route builder will give transfer orders instead of unload orders
 				local builder = RoadRouteBuilder(destSg, src, cargo, builderOpts);
 				local route = builder.Build();
 				if(route != null) {

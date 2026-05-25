@@ -849,7 +849,11 @@ class HogeAI extends AIController {
 				ScanRoutes();
 				break;
 			case 3:
-				ScanPlaces();
+				if(IsNetworkMode()) {
+					CheckCommonRouteReduce();
+				} else {
+					ScanPlaces();
+				}
 				break;
 			case 4:
 				if(IsNetworkMode()) PaxMailNetwork.Step();
@@ -1227,6 +1231,9 @@ class HogeAI extends AIController {
 		}
 		if(t.rawin("forceSrcTransfer")) {
 			builderOptions.forceSrcTransfer <- t.forceSrcTransfer;
+		}
+		if(t.rawin("freightNetworkInitialRoadVehicles")) {
+			builderOptions.freightNetworkInitialRoadVehicles <- t.freightNetworkInitialRoadVehicles;
 		}
 		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, builderOptions);
 		if(t.estimate.value < 0) {
@@ -3856,6 +3863,12 @@ class HogeAI extends AIController {
 		if(AIBase.RandRange(100) < 10) {
 			RoadRoute.CheckPendingDemolishLines();
 		}
+	}
+
+	function CheckCommonRouteReduce() {
+		CommonRoute.CheckReduce(RoadRoute);
+		CommonRoute.CheckReduce(WaterRoute);
+		CommonRoute.CheckReduce(AirRoute);
 	}
 
 	function DoPendingConstructions() {
