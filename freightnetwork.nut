@@ -1,4 +1,4 @@
-// freightnetwork.nut
+﻿// freightnetwork.nut
 // Strategy C freight network builder. Network mode only.
 
 class FreightNetwork {
