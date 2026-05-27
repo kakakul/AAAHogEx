@@ -1285,15 +1285,28 @@ class FreightNetwork {
 						FreightNetwork.availableJunctions.remove(ji);
 						continue;
 					}
+					local spineRailType = spineRoute.GetRailType();
+					if(engineSet.railType != spineRailType
+							|| !AIEngine.CanRunOnRail(engineSet.trainEngine, spineRailType)
+							|| !AIEngine.HasPowerOnRail(engineSet.trainEngine, spineRailType)) {
+						HgLog.Warning("FreightNetwork.SearchAndConnect: engineSet rail type mismatch, skipping branch "
+							+ "engineRailType=" + AIRail.GetName(engineSet.railType)
+							+ " spineRailType=" + AIRail.GetName(spineRailType)
+							+ " " + spineRoute);
+						FreightNetwork.availableJunctions.remove(ji);
+						continue;
+					}
+					local branchEngineSet = clone engineSet;
+					branchEngineSet.railType = spineRailType;
 
 					// BuildFirstTrain deploys 2 trains (engine + clone) for non-single routes.
 					// Add estimated track cost for the spur (both directions, matching Estimator.GetBuildingCost for VT_RAIL).
 					// Modified formula as GetBuildingCost estimation is very high.
 					local branchDist = AIMap.DistanceManhattan(found.tile, mergeTile);
 					local demolishFarm = HogeAI.GetInflatedMoney(540) * 25 / 100;
-					local trackCostPerTile = AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) + demolishFarm;
+					local trackCostPerTile = AIRail.GetBuildCost(spineRailType, AIRail.BT_TRACK) + demolishFarm;
 					local estimatedTrackCost = trackCostPerTile * 2 * branchDist
-						+ AIRail.GetBuildCost(engineSet.railType, AIRail.BT_TRACK) * 120;
+						+ AIRail.GetBuildCost(spineRailType, AIRail.BT_TRACK) * 120;
 					local estimatedCost = engineSet.price * 2 + estimatedTrackCost;
 					HgLog.Info("FreightNetwork cost check: estimatedCost=" + estimatedCost
 						+ " usableMoney=" + HogeAI.GetUsableMoney()
@@ -1309,9 +1322,9 @@ class FreightNetwork {
 						return false;
 					}
 
-					// Match rail type of spine so branch uses electrified/monorail/maglev correctly
+					// Match the physical spine rail type exactly.
 					local savedRailType = AIRail.GetCurrentRailType();
-					AIRail.SetCurrentRailType(engineSet.railType);
+					AIRail.SetCurrentRailType(spineRailType);
 
 					// Build src station
 					local srcPlace = HgIndustry(found.industry, true);
@@ -1439,7 +1452,7 @@ class FreightNetwork {
 					newRoute.isTransfer = false;
 					newRoute.isSrcTransfer = false;
 					newRoute.startDate = AIDate.GetCurrentDate();
-					newRoute.latestEngineSet = engineSet;
+					newRoute.latestEngineSet = branchEngineSet;
 					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
 					newRoute.destDepot = spineRoute.destDepot;
 					newRoute.parentRouteId = spineRoute.id;

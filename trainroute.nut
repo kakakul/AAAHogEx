@@ -3437,6 +3437,9 @@ class TrainRoute extends Route {
 	}
 
 	function CheckRailUpdate() {
+		if(IsNetworkFreightRoute()) {
+			return;
+		}
 		if(updateRailDepot == null) {
 			if(latestEngineVehicle == null || isBuilding || isClosed || failedUpdateRailType || IsChangeDestination()) {
 				return;
