@@ -17,7 +17,7 @@ require("paxmailnetwork.nut");
 
 
 class HogeAI extends AIController {
-	static version = 4;
+	static version = 5;
 
 	static container = Container();
 	static notBuildableList = AIList();

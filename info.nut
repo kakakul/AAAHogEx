@@ -3,8 +3,8 @@
    function GetAuthor()      { return "kakakul"; }
    function GetName()        { return "AAAHogNet"; }
    function GetDescription() { return "HogNet is a fork of AAAHogEx. HogNet changes the core objective away from profit maximisation: the AI tries to connect towns into a single large network, using a hub-and-spoke strategy. For industries, the AI tries to reuse infrastructure as much as possible, using a spine-and-branch strategy."; }
-   function GetVersion()     { return 4; }	// also change in main.nut
-   function MinVersionToLoad() { return 4; }
+   function GetVersion()     { return 5; }	// also change in main.nut
+   function MinVersionToLoad() { return 5; }
    function GetDate()        { return "2026-05-25"; }
    function CreateInstance() { return "HogeAI"; }
    function GetShortName()   { return "HOGN"; }
