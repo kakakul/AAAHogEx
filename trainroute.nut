@@ -318,6 +318,7 @@ class TrainRoute extends Route {
 	parentRouteId = null;
 	consumedJunction = null;
 	disableFullLoadOrder = null;
+	lastBuildFirstTrainFailureIsMoney = null;
 
 	saveData = null;
 	
@@ -361,6 +362,7 @@ class TrainRoute extends Route {
 		this.parentRouteId = null;
 		this.consumedJunction = null;
 		this.disableFullLoadOrder = false;
+		this.lastBuildFirstTrainFailureIsMoney = false;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -459,6 +461,10 @@ class TrainRoute extends Route {
 
 	function IsNetworkPaxMailRoute() {
 		return HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo);
+	}
+
+	function IsLastBuildFirstTrainFailureMoneyRelated() {
+		return lastBuildFirstTrainFailureIsMoney;
 	}
 
 	function GetActiveTrainVehicleCount() {
@@ -1672,6 +1678,7 @@ class TrainRoute extends Route {
 	}
 	
 	function _BuildFirstTrain() {
+		lastBuildFirstTrainFailureIsMoney = false;
 		saveData.latestEngineVehicle = latestEngineVehicle = BuildTrain(); //TODO 最初に失敗すると復活のチャンスなし。orderが後から書き変わる事があるがそれが反映されないため。orderを状態から組み立てられる必要がある
 		if(latestEngineVehicle == null) {
 			HgLog.Warning("BuildFirstTrain failed. "+this);
@@ -1852,9 +1859,12 @@ class TrainRoute extends Route {
 		local engineVehicle = BuildUtils.BuildVehicleWithRefitSafe(depotTile, trainEngine, cargo);
 		if(!AIVehicle.IsValidVehicle(engineVehicle)) {
 			local error = AIError.GetLastError();
-				HgLog.Warning("BuildVehicleWithRefit failed. engine:"
-					+ AIEngine.GetName(trainEngine) + " depot:" + HgTile(depotTile)
-					+ " " + AIError.GetLastErrorString() + " " + this);
+			if(error == AIError.ERR_NOT_ENOUGH_CASH) {
+				lastBuildFirstTrainFailureIsMoney = true;
+			}
+			HgLog.Warning("BuildVehicleWithRefit failed. engine:"
+				+ AIEngine.GetName(trainEngine) + " depot:" + HgTile(depotTile)
+				+ " " + AIError.GetLastErrorString() + " " + this);
 			if(engineVehicles.len() >= 1) {
 				AIVehicle.SellWagonChain(engineVehicles[0], 0);
 			}
@@ -1927,6 +1937,9 @@ class TrainRoute extends Route {
 				for(local i=0; i<wagonEngineInfo.numWagon; i++) {
 					local wagon = BuildUtils.BuildVehicleWithRefitSafe(depotTile, wagonEngineInfo.engine, wagonEngineInfo.cargo);
 					if(!AIVehicle.IsValidVehicle(wagon))  {
+						if(AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) {
+							lastBuildFirstTrainFailureIsMoney = true;
+						}
 						// AddUnsuitableEngineWagon(trainEngine, wagonEngineInfo.engine); wagonとの組み合わせの問題ではない
 						HgLog.Warning("BuildVehicleWithRefit wagon failed. #"+i+" "+AIEngine.GetName(wagonEngineInfo.engine)
 							+"["+AICargo.GetName(wagonEngineInfo.cargo)+"] "+HgTile(depotTile)
@@ -3344,6 +3357,11 @@ class TrainRoute extends Route {
 			}
 			local waiting = CargoUtils.GetEffectiveCargoWaiting(srcHgStation.stationId, destHgStation.stationId, cargo);
 			local capacity = GetCargoCapacity(cargo);
+			if(capacity <= 0) {
+				HgLog.Warning("CheckCloneTrain: suppressing clone, capacity <= 0 for "
+					+ AICargo.GetName(cargo) + " " + this);
+				return;
+			}
 			local waitingPressure = null;
 			if(IsNetworkPaxMailWaitingCapacityMode(cargo)) {
 				waitingPressure = GetRouteWaitingPressure(cargo);

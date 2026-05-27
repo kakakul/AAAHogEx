@@ -1467,7 +1467,20 @@ class FreightNetwork {
 
 					// Deploy initial train; skip DoPostBuild to avoid uncontrolled extensions
 					if(!newRoute.BuildFirstTrain()) {
-						HgLog.Warning("FreightNetwork.SearchAndConnect: BuildFirstTrain failed, continuing");
+						if(newRoute.IsLastBuildFirstTrainFailureMoneyRelated()) {
+							HgLog.Warning("FreightNetwork.SearchAndConnect: BuildFirstTrain deferred for money, route kept for retry "
+								+ newRoute);
+						} else {
+							HgLog.Warning("FreightNetwork.SearchAndConnect: BuildFirstTrain failed, rolling back "
+								+ newRoute);
+							newRoute.consumedJunction = null; // The source junction is still in availableJunctions.
+							newRoute.RemoveFinished();
+							if(Route.allRoutes.rawin(newRoute.id)) Route.allRoutes.rawdelete(newRoute.id);
+							junc.triedIndustries.rawset(found.industry, true);
+							AIRail.SetCurrentRailType(savedRailType);
+							ji++;
+							continue;
+						}
 					}
 
 					FreightNetwork.ScanFeeders(newRoute);
