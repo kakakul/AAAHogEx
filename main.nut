@@ -1235,6 +1235,9 @@ class HogeAI extends AIController {
 		if(t.rawin("freightNetworkInitialRoadVehicles")) {
 			builderOptions.freightNetworkInitialRoadVehicles <- t.freightNetworkInitialRoadVehicles;
 		}
+		if(t.rawin("deferFirstTrain")) {
+			builderOptions.deferFirstTrain <- t.deferFirstTrain;
+		}
 		local routeBuilder = routeClass.GetBuilderClass()(t.dest, t.src, t.cargo, builderOptions);
 		if(t.estimate.value < 0) {
 			HgLog.Info("t.estimate.value < 0 ("+t.estimate.value+") "+explain);

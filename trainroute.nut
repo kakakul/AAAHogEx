@@ -4166,10 +4166,13 @@ class TrainRouteBuilder extends RouteBuilder {
 		route.CalculateUseDepots();
 		
 		destHgStation.BuildAfter();
-		if(!route.BuildFirstTrain()) {
-			HgLog.Warning("TrainRoute: BuildFirstTrain failed."+route);
-			route.Demolish();
-			return null;
+		local deferFirstTrain = options.rawin("deferFirstTrain") && options.deferFirstTrain;
+		if(!deferFirstTrain) {
+			if(!route.BuildFirstTrain()) {
+				HgLog.Warning("TrainRoute: BuildFirstTrain failed."+route);
+				route.Demolish();
+				return null;
+			}
 		}
 		
 		HgLog.Info("TrainRoute.BuildSummary routeId:"+route.id
@@ -4180,6 +4183,7 @@ class TrainRouteBuilder extends RouteBuilder {
 				+" bidirectional:"+isBiDirectional
 				+" transfer:"+isTransfer
 				+" support:"+route.IsSupport()
+				+" deferFirstTrain:"+deferFirstTrain
 				+" "+route);
 		if(route.routeTraceId != null) {
 			HgLog.Info("TrainRoute.Build succeeded trace:"+route.routeTraceId+" routeId:"+route.id+" "+route);

@@ -46,14 +46,11 @@ class FreightNetwork {
 		}
 		if(FreightNetwork.state.destIndustry == null) {
 			if(!FreightNetwork.FindTownDelivery()) {
-				local built = FreightNetwork.FindSpine();
-				if(built) FreightNetwork.BuildJunctions();
+				FreightNetwork.FindSpine();
 			}
 		} else {
 			local connected = FreightNetwork.SearchAndConnect();
-			if(connected) {
-				FreightNetwork.BuildJunctions();
-			} else if(!FreightNetwork.HasAvailableJunctionForDest(FreightNetwork.state.destIndustry)) {
+			if(!connected && !FreightNetwork.HasAvailableJunctionForDest(FreightNetwork.state.destIndustry)) {
 				HgLog.Info("FreightNetwork: network exhausted, starting network id="
 					+ (FreightNetwork.state.networkId + 1));
 				FreightNetwork.state.destIndustry = null;
@@ -867,7 +864,9 @@ class FreightNetwork {
 		foreach(indId, _ in AIIndustryList()) {
 			if(FreightNetwork.servedSources.rawin(indId)) continue;
 			local indType = AIIndustry.GetIndustryType(indId);
-			foreach(cargo, _ in AIIndustryType.GetProducedCargo(indType)) {
+			local producedCargo = AIIndustryType.GetProducedCargo(indType);
+			if(producedCargo == null) continue;
+			foreach(cargo, _ in producedCargo) {
 				if(CargoUtils.IsPaxOrMail(cargo)) continue;
 				if(!cargoProducers.rawin(cargo)) cargoProducers.rawset(cargo, []);
 				cargoProducers[cargo].push({
@@ -971,6 +970,7 @@ class FreightNetwork {
 					score        = bestCandidate.score,
 					isBiDirectional = false,
 					notUseSingle = true,
+					deferFirstTrain = true,
 					explain      = bestCandidate.estimate.value + " RAIL "
 						+ destPlace + "<=" + srcPlace
 						+ "[" + bestCandidate.cargo + "] dist:" + bestCandidate.dist
@@ -1002,9 +1002,20 @@ class FreightNetwork {
 				FreightNetwork.servedDests.rawset(bestCandidate.destId, 1);
 				FreightNetwork.servedSources.rawset(bestCandidate.srcId, true);
 				FreightNetwork.state.lastBuiltRoute = newRoutes[0];
+				FreightNetwork.BuildJunctions();
+				if(!newRoutes[0].BuildFirstTrain()) {
+					HgLog.Warning("FreightNetwork.FindSpine: BuildFirstTrain failed after junction build, rolling back "
+						+ newRoutes[0]);
+					FreightNetwork.RemoveUnusedJunctionsForRoute(newRoutes[0].id);
+					newRoutes[0].Demolish();
+					FreightNetwork.state.destIndustry = null;
+					FreightNetwork.state.destPlace = null;
+					FreightNetwork.state.lastBuiltRoute = null;
+					return false;
+				}
 				FreightNetwork.ScanDestFeeders(newRoutes[0]);
 				FreightNetwork.ScanFeeders(newRoutes[0]);
-				HgLog.Info("FreightNetwork.FindSpine: spine built, advancing to BuildJunctions");
+				HgLog.Info("FreightNetwork.FindSpine: spine built with pre-start junctions");
 				return true;
 			}
 		}
@@ -1017,6 +1028,11 @@ class FreightNetwork {
 		local route = FreightNetwork.state.lastBuiltRoute;
 		if(route == null) {
 			HgLog.Warning("FreightNetwork.BuildJunctions: lastBuiltRoute is null, skipping");
+			return;
+		}
+		if(route.GetVehicleList().Count() > 0) {
+			HgLog.Warning("FreightNetwork.BuildJunctions: route already has vehicles, skipping live junction build "
+				+ route);
 			return;
 		}
 
@@ -1477,6 +1493,8 @@ class FreightNetwork {
 					TrainRoute.instances.push(newRoute);
 					PlaceDictionary.Get().AddRoute(newRoute);
 					newRoute.RegisterRailUsage();
+					FreightNetwork.state.lastBuiltRoute = newRoute;
+					FreightNetwork.BuildJunctions();
 
 					// Deploy initial train; skip DoPostBuild to avoid uncontrolled extensions
 					if(!newRoute.BuildFirstTrain()) {
@@ -1486,6 +1504,7 @@ class FreightNetwork {
 						} else {
 							HgLog.Warning("FreightNetwork.SearchAndConnect: BuildFirstTrain failed, rolling back "
 								+ newRoute);
+							FreightNetwork.RemoveUnusedJunctionsForRoute(newRoute.id);
 							newRoute.consumedJunction = null; // The source junction is still in availableJunctions.
 							newRoute.RemoveFinished();
 							if(Route.allRoutes.rawin(newRoute.id)) Route.allRoutes.rawdelete(newRoute.id);
@@ -1505,8 +1524,8 @@ class FreightNetwork {
 						? FreightNetwork.servedDests[FreightNetwork.state.destIndustry] : 0) + 1;
 					FreightNetwork.servedDests.rawset(FreightNetwork.state.destIndustry, newDestSrcCount);
 
-					// Update lastBuiltRoute so BuildJunctions (called from Step after we
-					// return) places new junctions near this branch station, not on the spine.
+					// Keep lastBuiltRoute on this route so later branch searches can use
+					// its newly recorded junctions. Junctions are built before trains start.
 					FreightNetwork.state.lastBuiltRoute = newRoute;
 					AIRail.SetCurrentRailType(savedRailType);
 					HgLog.Info("FreightNetwork.SearchAndConnect: connected via junction "
