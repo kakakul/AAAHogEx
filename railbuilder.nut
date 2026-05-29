@@ -3430,7 +3430,7 @@ class RightDivergeDiagonalJunction {
 			}
 		}
 
-		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		local pbs = AIRail.SIGNALTYPE_PBS;
 		// BuildSignals(0, -1, 0, -1, pbs); // Spine SW-bound signal at (0,-1), train continues toward (0,0). TODO: Signals not being placed correctly
 		// BuildSignals(2, 2, 1, 0, pbsh); // Spine NE-bound signal at (2,2), train continues toward (1,2). TODO: Signals not being placed correctly
 		BuildSignals(3, 1, 1, 0, pbs); // Branch inbound signal at (3,1), train continues toward (2,1). Inverted direction
@@ -3676,7 +3676,7 @@ class RightDivergeJunction {
 		}
 
 		// Add signals to junction
-		local pbs = AIRail.SIGNALTYPE_PBS_ONEWAY;
+		local pbs = AIRail.SIGNALTYPE_PBS;
 		BuildSignals(0,2, 0,1, pbs); // Signal on mainline heading north
 		BuildSignals(1,-1, 0,-1, pbs); // Signal on mainline heading south
 		BuildSignals(2,1, 0,1, pbs); // Signal on branch from the west merging into mainline
