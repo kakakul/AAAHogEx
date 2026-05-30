@@ -4150,10 +4150,14 @@ class TrainRouteBuilder extends RouteBuilder {
 			isSingle = useSingle
 		};
 		railBuilder.noRollbackOnLoad = true;
+		local isFreightNetworkSpine = options.rawin("freightNetworkSpine") && options.freightNetworkSpine;
 		if(useSingle) {
 			railBuilder.isBuildSingleDepotDestToSrc = true;
 		} else {
-			if(hogeAI.IsEnableVehicleBreakdowns()) {
+			if(isFreightNetworkSpine) {
+				// Required for freightnetwork spines to prevent u-turns to get to depots on the other side of the track, which can cause deadlocks.
+				railBuilder.isBuildSideDepots = true;
+			} else if(hogeAI.IsEnableVehicleBreakdowns()) {
 				if(useSimpleStation) {
 					//railBuilder.isBuildSingleDepotDestToSrc = true;
 				}
@@ -4222,6 +4226,7 @@ class TrainRouteBuilder extends RouteBuilder {
 			}
 		}
 		
+		local sideDepots = ("isBuildSideDepots" in railBuilder) && railBuilder.isBuildSideDepots;
 		HgLog.Info("TrainRoute.BuildSummary routeId:"+route.id
 				+" trace:"+route.routeTraceId
 				+" pathDistance:"+route.pathDistance
@@ -4231,6 +4236,7 @@ class TrainRouteBuilder extends RouteBuilder {
 				+" transfer:"+isTransfer
 				+" support:"+route.IsSupport()
 				+" deferFirstTrain:"+deferFirstTrain
+				+" sideDepots:"+sideDepots
 				+" "+route);
 		if(route.routeTraceId != null) {
 			HgLog.Info("TrainRoute.Build succeeded trace:"+route.routeTraceId+" routeId:"+route.id+" "+route);

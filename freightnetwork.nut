@@ -971,6 +971,7 @@ class FreightNetwork {
 					isBiDirectional = false,
 					notUseSingle = true,
 					deferFirstTrain = true,
+					freightNetworkSpine = true,
 					explain      = bestCandidate.estimate.value + " RAIL "
 						+ destPlace + "<=" + srcPlace
 						+ "[" + bestCandidate.cargo + "] dist:" + bestCandidate.dist

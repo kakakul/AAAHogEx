@@ -710,6 +710,87 @@ class Path {
 		}
 	}
 
+	function BuildSideDepotsWithParallelTrack(otherPath, isFirstLine = false) {
+		local tiles = GetTiles();
+		local otherTiles = otherPath.GetTiles();
+		local otherTileSet = {};
+		foreach(tile in otherTiles) {
+			otherTileSet.rawset(tile,tile);
+		}
+		local tileLine = {};
+		if(isFirstLine) {
+			foreach(length in [3,5]) {
+				foreach(line in RailPathFinder.FindStraightLines(tiles,length)) {
+					local center = line[length/2];
+					tileLine.rawset(center,line);
+				}
+			}
+		} else {
+			foreach(line in RailPathFinder.FindStraightLines(tiles,3)) {
+				tileLine.rawset(line[1],line);
+			}
+		}
+		local path = this;
+		local prev = null;
+		local cur = null;
+		for(;path != null; prev = cur, path = path.GetParent()) {
+			cur = path.GetTile();
+			local nextPath = path.GetParent();
+			if(prev == null || nextPath == null) continue;
+			local next = nextPath.GetTile();
+			if(!tileLine.rawin(cur)) continue;
+			local result = BuildSideDepotsOnParallelTracks(prev, cur, next, otherTileSet);
+			if(result != null) {
+				result.path <- path;
+				return result;
+			}
+		}
+		return null;
+	}
+
+	function BuildSideDepotsOnParallelTracks(prev, cur, next, otherTileSet) {
+		local dir = abs(cur - prev) == 1 ? AIMap.GetMapSizeX() : 1;
+		local mate = null;
+		local depot1 = null;
+		local depot2 = null;
+		if(otherTileSet.rawin(cur + dir)) {
+			mate = cur + dir;
+			depot1 = cur - dir;
+			depot2 = mate + dir;
+		} else if(otherTileSet.rawin(cur - dir)) {
+			mate = cur - dir;
+			depot1 = cur + dir;
+			depot2 = mate - dir;
+		} else {
+			return null;
+		}
+		local deltaPrev = prev - cur;
+		local deltaNext = next - cur;
+		local matePrev = mate + deltaPrev;
+		local mateNext = mate + deltaNext;
+		if(!otherTileSet.rawin(matePrev) || !otherTileSet.rawin(mateNext)) {
+			return null;
+		}
+		if(!AITile.IsBuildable(depot1) || !AITile.IsBuildable(depot2)
+				|| RailPathFinder._IsSlopedRail(prev, cur, next)
+				|| RailPathFinder._IsSlopedRail(matePrev, mate, mateNext)) {
+			return null;
+		}
+		local level = AITile.GetMaxHeight(cur);
+		if(level == 0) {
+			return null;
+		}
+		TileListUtils.LevelHeightTiles([depot1, depot2, cur, mate], level);
+		if(!HgTile(cur).BuildDepot(depot1, prev, next)) {
+			return null;
+		}
+		if(!HgTile(mate).BuildDepot(depot2, matePrev, mateNext)) {
+			HgTile(depot1).RemoveDepot();
+			return null;
+		}
+		return {mainTiles=[prev,cur,next,matePrev,mate,mateNext],depots=[depot1,depot2]};
+	}
+
 /*	
 	function BuildDoubleDepotMinLength(minLength) {
 		
@@ -2497,6 +2578,23 @@ class ConstructionRailBuilder extends Construction {
 		}*/
 		return firstDepot;
 	}
+
+	function BuildSideDepots(path,otherPath,isFirstLine=false) {
+		if(path == null || otherPath == null) {
+			return null;
+		}
+		local built = path.BuildSideDepotsWithParallelTrack(otherPath,isFirstLine);
+		if(built != null) {
+			depots.extend(built.depots);
+			AddRollback(built.depots,"tiles");
+			HgLog.Info("BuildSideDepots built depot1:" + HgTile(built.depots[0])
+				+ " depot2:" + HgTile(built.depots[1])
+				+ " track1:" + HgTile(built.mainTiles[1])
+				+ " track2:" + HgTile(built.mainTiles[4]));
+			return built.depots[0];
+		}
+		return null;
+	}
 	
 	
 	function BuildSingleDepot(path) {
@@ -2531,6 +2629,7 @@ class TwoWayPathToStationRailBuilder extends ConstructionRailBuilder {
 	pathBuildParams = null;
 	
 	isBuildDoubleDepots = null;
+	isBuildSideDepots = null;
 	isBuildSingleDepotDestToSrc = null;
 	noRollbackOnLoad = null;
 
@@ -2543,6 +2642,7 @@ class TwoWayPathToStationRailBuilder extends ConstructionRailBuilder {
 			typeName = "TwoWayPathToStationRailBuilder"
 		});
 		this.isBuildDoubleDepots = false;
+		this.isBuildSideDepots = false;
 		this.isBuildSingleDepotDestToSrc = false;
 		this.isReverse = false;
 		this.noRollbackOnLoad = false;
@@ -2603,7 +2703,7 @@ class TwoWayPathToStationRailBuilder extends ConstructionRailBuilder {
 		if(!IsBuilt("depot2")) {
 			if(isBuildDoubleDepots) {
 				BuildDoubleDepots(buildedPath2.path.Reverse().SubPathIndex(16),depotInterval);
-			}		
+			}
 			if(isBuildSingleDepotDestToSrc) {
 				BuildSingleDepot(buildedPath1.path.Reverse().SubPathIndex(16));
 				BuildSingleDepot(buildedPath2.path.Reverse().SubPathIndex(16));
@@ -2632,6 +2732,7 @@ class TwoWayStationRailBuilder extends ConstructionRailBuilder {
 	pathBuildParams = null;
 	
 	isBuildDoubleDepots = null;
+	isBuildSideDepots = null;
 	isBuildSingleDepotDestToSrcSideDest = null;
 	isBuildSingleDepotDestToSrc = null;
 	noRollbackOnLoad = null;
@@ -2652,6 +2753,7 @@ class TwoWayStationRailBuilder extends ConstructionRailBuilder {
 		this.limitCount = limitCount;
 		this.eventPoller = eventPoller;
 		this.isBuildDoubleDepots = false;
+		this.isBuildSideDepots = false;
 		this.isBuildSingleDepotDestToSrcSideDest = false;
 		this.isBuildSingleDepotDestToSrc = false;
 		this.depots = [];
@@ -2705,6 +2807,13 @@ class TwoWayStationRailBuilder extends ConstructionRailBuilder {
 		srcDepot = GetBuilt("srcDepot");
 		if(!IsBuilt("depot2")) {
 			local distance = AIMap.DistanceManhattan( srcHgStation.platformTile, destHgStation.platformTile);
+			if(isBuildSideDepots) {
+				local sideDepot = BuildSideDepots(buildedPath2.path.Reverse().SubPathIndex(4),buildedPath1.path,true);
+				if(srcDepot == null && sideDepot != null) {
+					srcDepot = sideDepot;
+					SetBuilt("srcDepot",srcDepot);
+				}
+			}
 			if(isBuildDoubleDepots && distance > depotInterval) {
 				BuildDoubleDepots(buildedPath1.path.SubPathIndex(4),depotInterval);
 			}
