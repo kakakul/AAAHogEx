@@ -61,6 +61,9 @@ class RailPathFinder
 	revOkTiles = null;
 	orgTile = null;
 	trainDirection = null; // 列車進行方向 0:goal方向 1:start方向 2:双方向
+	forbiddenLevelCrossingCenter = null;
+	forbiddenLevelCrossingRadius = null;
+	forbiddenLevelCrossingAllowedTiles = null;
 	
 	isFoundPath = false;
 	
@@ -268,6 +271,17 @@ class RailPathFinder
 	
 	function AreTilesConnectedAndMine(a,b,c) {
 		return AIRail.AreTilesConnected(a,b,c) && AICompany.IsMine(AITile.GetOwner(b));
+	}
+
+	function _IsForbiddenLevelCrossingTile(tile) {
+		return forbiddenLevelCrossingCenter != null
+			&& forbiddenLevelCrossingRadius != null
+			&& (forbiddenLevelCrossingAllowedTiles == null || !forbiddenLevelCrossingAllowedTiles.rawin(tile))
+			&& AIMap.DistanceManhattan(tile, forbiddenLevelCrossingCenter) <= forbiddenLevelCrossingRadius
+			&& AITile.HasTransportType(tile, AITile.TRANSPORT_RAIL)
+			&& !AIBridge.IsBridgeTile(tile)
+			&& !AITunnel.IsTunnelTile(tile)
+			&& !RailPathFinder._IsUnderBridge(tile);
 	}
 		
 	function IsFoundGoal() {
@@ -1132,6 +1146,9 @@ class RailPathFinder
 					next_tile - cur_node == par.GetParent().GetTile() - par_tile) continue;
 				if (par != null && par.GetParent() == null &&
 					self._IsInclude90DegreeTrack(par_tile, next_tile, cur_node)) continue;			
+				if (par != null
+						&& self._IsForbiddenLevelCrossingTile(cur_node)
+						&& !RailPathFinder.AreTilesConnectedAndMine(par_tile, cur_node, next_tile)) continue;
 				/* We add them to the to the neighbours-list if we can build a rail to
 				 *  them and no rail exists there. */
 				if (par == null 
@@ -1184,6 +1201,10 @@ class RailPathFinder
 	}
 
 	function _BuildRail(p1,p2,p3) {
+		if(_IsForbiddenLevelCrossingTile(p2)
+				&& !RailPathFinder.AreTilesConnectedAndMine(p1, p2, p3)) {
+			return false;
+		}
 		if(AIRail.BuildRail(p1,p2,p3)) {
 			return true;
 		}

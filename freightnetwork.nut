@@ -1096,6 +1096,7 @@ class FreightNetwork {
 					mergeTile = result.leftTile,
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
+					allowedTiles = result.leftAllowedTiles,
 					srcIndustry = srcIndustry,
 					destIndustry = destIndustry,
 					routeId = route.id,
@@ -1127,6 +1128,7 @@ class FreightNetwork {
 					mergeTile = result.rightTile,
 					leg1Path = legs.leg1Path,
 					leg2Path = legs.leg2Path,
+					allowedTiles = result.rightAllowedTiles,
 					srcIndustry = srcIndustry,
 					destIndustry = destIndustry,
 					routeId = route.id,
@@ -1377,7 +1379,14 @@ class FreightNetwork {
 					// the arm outer tip heading away from the junction, not at a spine tile.
 					local arm1Start = [[leg1Tiles[0], leg1Tiles[1], leg1Tiles[2], leg1Tiles[3]]];
 					local arm2Start = [[leg2Tiles[0], leg2Tiles[1], leg2Tiles[2], leg2Tiles[3]]];
+					local allowedJunctionTiles = [];
+					if(junc.rawin("allowedTiles") && junc.allowedTiles != null) {
+						allowedJunctionTiles.extend(junc.allowedTiles);
+					}
+					allowedJunctionTiles.extend(leg1Tiles);
+					allowedJunctionTiles.extend(leg2Tiles);
 
+					local maxTrainStationLength = min(AIGameSettings.GetValue("vehicle.max_train_length"), 11); // hard cap of 11 tiles for station and train length for freight, as junctions cannot handle longer than that (deadlock)
 					local pathBuildParams = {
 						engine          = engineSet.engine,
 						cargo           = found.cargo,
@@ -1385,7 +1394,9 @@ class FreightNetwork {
 						distance        = AIMap.DistanceManhattan(found.tile, destTile2),
 						isTransfer      = false,
 						isBiDirectional = false,
-						isSingle        = false
+						isSingle        = false,
+						forbiddenLevelCrossingCenter = junc.mergeTile,
+						forbiddenLevelCrossingRadius = maxTrainStationLength
 					};
 
 					// Leg 1 (pathSrcToDest, isReverse=true): inbound arm tip → spur departures.
@@ -1408,6 +1419,7 @@ class FreightNetwork {
 					foreach(goalTiles in srcHgStation.GetArrivalsTiles()) {
 						RailPathFinder.SetRevOkTiles(builder1.revOkTiles, goalTiles);
 					}
+					pathBuildParams.rawset("forbiddenLevelCrossingAllowedTiles", allowedJunctionTiles);
 					builder1.pathBuildParams = pathBuildParams;
 					builder1.isReverse = true;
 					builder1.isRevReverse = false;
@@ -1441,6 +1453,7 @@ class FreightNetwork {
 					foreach(goalTiles in srcHgStation.GetDeparturesTiles()) {
 						RailPathFinder.SetRevOkTiles(builder2.revOkTiles, goalTiles);
 					}
+					pathBuildParams.rawset("forbiddenLevelCrossingAllowedTiles", allowedJunctionTiles);
 					builder2.pathBuildParams = pathBuildParams;
 					builder2.isReverse = false;
 					builder2.isRevReverse = false;

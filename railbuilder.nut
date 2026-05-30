@@ -1185,6 +1185,14 @@ class RailBuilder extends Construction {
 					
 					HogeAI.WaitForMoney(1000);
 					AddRollback({name="rail",tiles=[prevprev,prev,path.GetTile()]});
+					if(pathFinder != null
+							&& pathFinder._IsForbiddenLevelCrossingTile(prev)
+							&& !RailPathFinder.AreTilesConnectedAndMine(prevprev, prev, path.GetTile())) {
+						HgLog.Warning("RailBuilder: forbidden same-level rail crossing near junction "
+							+ HgTile(prev) + " center:" + HgTile(pathFinder.forbiddenLevelCrossingCenter)
+							+ " radius:" + pathFinder.forbiddenLevelCrossingRadius);
+						return RetryToBuild(path,prev);
+					}
 					if(!(isGoalOrStart && RailPathFinder.AreTilesConnectedAndMine(prevprev, prev, path.GetTile()))
 							&& !RailBuilder.BuildRailForce(prevprev, prev, path.GetTile())) {
 						local succeeded = false;
@@ -2296,6 +2304,17 @@ class RailPathBuilder extends Construction {
 		pathFinder1.revOkTiles = revOkTiles;
 		pathFinder1.orgTile = orgTile;
 		pathFinder1.debug = debug;
+		if(pathBuildParams.rawin("forbiddenLevelCrossingCenter")) {
+			pathFinder1.forbiddenLevelCrossingCenter = pathBuildParams.forbiddenLevelCrossingCenter;
+			pathFinder1.forbiddenLevelCrossingRadius = pathBuildParams.rawin("forbiddenLevelCrossingRadius")
+				? pathBuildParams.forbiddenLevelCrossingRadius : min(AIGameSettings.GetValue("vehicle.max_train_length"), 11);
+			if(pathBuildParams.rawin("forbiddenLevelCrossingAllowedTiles")) {
+				pathFinder1.forbiddenLevelCrossingAllowedTiles = {};
+				foreach(tile in pathBuildParams.forbiddenLevelCrossingAllowedTiles) {
+					pathFinder1.forbiddenLevelCrossingAllowedTiles.rawset(tile, true);
+				}
+			}
+		}
 		local starts = srcTilesGetter.Get();
 		local goals = destTilesGetter.Get();
 		if(starts.len()==0) {
@@ -2335,6 +2354,17 @@ class RailPathBuilder extends Construction {
 		pathFinder2.revOkTiles = revOkTiles;;
 		pathFinder2.orgTile = orgTile;
 		pathFinder2.debug = debug;
+		if(pathBuildParams.rawin("forbiddenLevelCrossingCenter")) {
+			pathFinder2.forbiddenLevelCrossingCenter = pathBuildParams.forbiddenLevelCrossingCenter;
+			pathFinder2.forbiddenLevelCrossingRadius = pathBuildParams.rawin("forbiddenLevelCrossingRadius")
+				? pathBuildParams.forbiddenLevelCrossingRadius : min(AIGameSettings.GetValue("vehicle.max_train_length"), 11);
+			if(pathBuildParams.rawin("forbiddenLevelCrossingAllowedTiles")) {
+				pathFinder2.forbiddenLevelCrossingAllowedTiles = {};
+				foreach(tile in pathBuildParams.forbiddenLevelCrossingAllowedTiles) {
+					pathFinder2.forbiddenLevelCrossingAllowedTiles.rawset(tile, true);
+				}
+			}
+		}
 		pathFinder2.InitializePath(destTilesGetter.Get(), srcTilesGetter.Get(), ignoreTiles, reversePath);
 		return pathFinder2;
 	}
@@ -3735,6 +3765,8 @@ class FourWayJunction {
 		local rightPath = null;
 		local leftInboundPath = null;
 		local rightInboundPath = null;
+		local leftAllowedTiles = null;
+		local rightAllowedTiles = null;
 
 		// Need i-2, i-1, i, i+1, i+2 all valid.
 		for(local i = minDist; i <= maxDist && i + 3 < mainTiles.len(); i++) {
@@ -3902,6 +3934,10 @@ class FourWayJunction {
 										rightTile = rightJ.GetBranchEndTile();
 										rightPath = rightJ.GetBranchPath();
 										rightInboundPath = rightJ.GetInboundBranchPath();
+										rightAllowedTiles = [];
+										foreach(xy in rightJ.GetRequiredTiles()) {
+											rightAllowedTiles.append(rightJ.At(xy[0], xy[1]));
+										}
 									}
 								} else {
 									HgLog.Info("FourWayJunction.Try: right test failed at i=" + i
@@ -3918,6 +3954,10 @@ class FourWayJunction {
 										leftTile = leftJ.GetBranchEndTile();
 										leftPath = leftJ.GetBranchPath();
 										leftInboundPath = leftJ.GetInboundBranchPath();
+										leftAllowedTiles = [];
+										foreach(xy in leftJ.GetRequiredTiles()) {
+											leftAllowedTiles.append(leftJ.At(xy[0], xy[1]));
+										}
 									}
 								} else {
 									HgLog.Info("FourWayJunction.Try: left test failed at i=" + i
@@ -3979,6 +4019,10 @@ class FourWayJunction {
 							rightTile = rightJ.GetBranchEndTile();
 							rightPath = rightJ.GetBranchPath();
 							rightInboundPath = rightJ.GetInboundBranchPath();
+							rightAllowedTiles = [];
+							foreach(xy in rightJ.GetRequiredTiles()) {
+								rightAllowedTiles.append(rightJ.At(xy[0], xy[1]));
+							}
 							HgLog.Info("RightDivergeDiagonalJunction built"
 								+ " [" + isNESW + "," + isHeadingSouth + "]"
 								+ " origin=" + HgTile(origin)
@@ -3996,6 +4040,10 @@ class FourWayJunction {
 							leftTile = leftJ.GetBranchEndTile();
 							leftPath = leftJ.GetBranchPath();
 							leftInboundPath = leftJ.GetInboundBranchPath();
+							leftAllowedTiles = [];
+							foreach(xy in leftJ.GetRequiredTiles()) {
+								leftAllowedTiles.append(leftJ.At(xy[0], xy[1]));
+							}
 							HgLog.Info("LeftDivergeDiagonalJunction built"
 								+ " [" + isNESW + "," + isHeadingSouth + "]"
 								+ " origin=" + HgTile(origin)
@@ -4010,7 +4058,8 @@ class FourWayJunction {
 			+ " leftTile=" + leftTile + " rightTile=" + rightTile);
 		return {leftTile = leftTile, rightTile = rightTile,
 			leftPath = leftPath, rightPath = rightPath,
-			leftInboundPath = leftInboundPath, rightInboundPath = rightInboundPath};
+			leftInboundPath = leftInboundPath, rightInboundPath = rightInboundPath,
+			leftAllowedTiles = leftAllowedTiles, rightAllowedTiles = rightAllowedTiles};
 	}
 
 	// Check if mainTiles[i-6..i+7] forms a diagonal parallel-track window.
