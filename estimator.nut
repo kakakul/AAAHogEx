@@ -1122,6 +1122,27 @@ class TrainEstimator extends Estimator {
 		return result;
 	}
 
+	function IsNetworkFreightTrainCountGuardEnabled() {
+		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
+	}
+
+	function GetNetworkFreightMaxTrainLength() {
+		return 11;
+	}
+
+	function IsTrainPlanAtNetworkFreightMaxLength(trainPlan) {
+		local remainingLength = GetNetworkFreightMaxTrainLength() * 16 - trainPlan.GetLength();
+		if(remainingLength <= 0) return true;
+
+		local minWagonLength = 16;
+		foreach(wagonInfo in trainPlan.wagonInfos) {
+			if(wagonInfo.rawin("lengthWeight") && wagonInfo.lengthWeight[0] > 0) {
+				minWagonLength = min(minWagonLength, wagonInfo.lengthWeight[0]);
+			}
+		}
+		return remainingLength < minWagonLength;
+	}
+
 	function CalculateSubCargoNumWagons(wagonEngineInfos, numMainWagon, totalNumWagon, locoCapacity) {
 		local mainWagonNull = wagonEngineInfos[0].capacity == 0;
 		if(subCargos.len() == 0) {
@@ -1793,6 +1814,13 @@ class TrainEstimator extends Estimator {
 						estimation.isSingle = isSingle;
 						
 						estimation.Estimate();
+						if(IsNetworkFreightTrainCountGuardEnabled()
+								&& platformLength == null
+								&& !isSingle
+								&& estimation.vehiclesPerRoute > 8
+								&& !IsTrainPlanAtNetworkFreightMaxLength(trainPlan)) {
+							continue;
+						}
 						/*
 						trainPlan.reachMaxVehicles = estimation.vehiclesPerRoute >= maxVehicles;
 						if(trainPlan.priorityWagon == null) {

@@ -459,6 +459,29 @@ class TrainRoute extends Route {
 		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
 	}
 
+	function GetNetworkFreightTrainSoftCap() {
+		return 12;
+	}
+
+	function GetNetworkFreightMaxTrainLength() {
+		return 11;
+	}
+
+	function IsNetworkFreightConsistAtMaxUsableLength(engineSet = null) {
+		if(engineSet == null) engineSet = latestEngineSet;
+		if(engineSet == null) return true;
+		local remainingLength = GetPlatformLength() * 16 - engineSet.length;
+		if(remainingLength <= 0) return true;
+
+		local minWagonLength = 16;
+		foreach(wagonEngineInfo in engineSet.wagonEngineInfos) {
+			if(wagonEngineInfo.rawin("lengthWeight") && wagonEngineInfo.lengthWeight[0] > 0) {
+				minWagonLength = min(minWagonLength, wagonEngineInfo.lengthWeight[0]);
+			}
+		}
+		return remainingLength < minWagonLength;
+	}
+
 	function IsNetworkPaxMailRoute() {
 		return HogeAI.Get().IsNetworkMode() && CargoUtils.IsPaxOrMail(cargo);
 	}
@@ -3311,6 +3334,20 @@ class TrainRoute extends Route {
 		}
 		
 		local numVehicles = GetNumVehicles();
+		if(IsNetworkFreightRoute() && latestEngineSet != null
+				&& latestEngineSet.vehiclesPerRoute > 10
+				&& !IsNetworkFreightConsistAtMaxUsableLength(latestEngineSet)) {
+			HgLog.Info("NetworkFreightTrainRedesign needed vehiclesPerRoute:"
+				+ latestEngineSet.vehiclesPerRoute
+				+ " length:" + latestEngineSet.length
+				+ " platformLength:" + GetPlatformLength()
+				+ " " + this);
+			InvalidateEngineSet();
+			if(ChooseEngineSet() == null) {
+				return;
+			}
+			latestEngineSet = GetLatestEngineSet();
+		}
 		local transitionMissing = 0;
 		if(transitionTarget != null && latestEngineSet != null) {
 			if(HandleRedesignTransition(latestEngineSet)) {
@@ -3372,7 +3409,14 @@ class TrainRoute extends Route {
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null && transitionMissing <= 0) numClone = min(numClone, maxTrains - numVehicles);
 			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+				local freightTrainCap = GetNetworkFreightTrainSoftCap();
+				if(numVehicles >= freightTrainCap) {
+					HgLog.Info("NetworkFreightTrainSoftCap: suppressing clone numVehicles="
+						+ numVehicles + " cap=" + freightTrainCap + " " + this);
+					return;
+				}
 				numClone = min(numClone, latestEngineSet.vehiclesPerRoute - numVehicles);
+				numClone = min(numClone, freightTrainCap - numVehicles);
 				if(numClone <= 0) {
 					HgLog.Info("CheckCloneTrain: suppressing clone, numVehicles=" + numVehicles
 						+ " >= vehiclesPerRoute=" + latestEngineSet.vehiclesPerRoute + " " + this);
@@ -4007,6 +4051,9 @@ class TrainRouteBuilder extends RouteBuilder {
 			destStationFactory.useSingle = useSingle;
 			destStationFactory.useSimple = useSimpleStation;
 			local estimatedPlatformLength = trainLength;
+			if(HogeAI.Get().IsNetworkMode()) {
+				estimatedPlatformLength = min(estimatedPlatformLength + 2, 11);
+			}
 			if(canChangeDest && HogeAI.Get().roiBase && HogeAI.Get().GetQuarterlyIncome() > HogeAI.Get().GetInflatedMoney(50000)) {
 				estimatedPlatformLength *= 2; //roiBaseの場合、将来延ばす分も考慮
 			}
