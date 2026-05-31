@@ -1317,6 +1317,7 @@ class FreightNetwork {
 					}
 					local branchEngineSet = clone engineSet;
 					branchEngineSet.railType = spineRailType;
+					branchEngineSet.vehiclesPerRoute = min(branchEngineSet.vehiclesPerRoute, 6);
 
 					// BuildFirstTrain deploys 2 trains (engine + clone) for non-single routes.
 					// Add estimated track cost for the spur (both directions, matching Estimator.GetBuildingCost for VT_RAIL).
@@ -1483,6 +1484,8 @@ class FreightNetwork {
 					newRoute.isSrcTransfer = false;
 					newRoute.startDate = AIDate.GetCurrentDate();
 					newRoute.latestEngineSet = branchEngineSet;
+					newRoute.engineSetsCache = [branchEngineSet];
+					newRoute.engineSetsDate = AIDate.GetCurrentDate();
 					newRoute.srcDepot = srcHgStation.GetDepotTile() != null ? srcHgStation.GetDepotTile() : builder1.srcDepot;
 					newRoute.destDepot = spineRoute.destDepot;
 					newRoute.parentRouteId = spineRoute.id;

@@ -1456,6 +1456,9 @@ class TrainRoute extends Route {
 		trainEstimator.railType = GetRailType();
 		trainEstimator.isRoRo = !IsTransfer();
 		trainEstimator.platformLength = GetPlatformLength();
+		if(IsNetworkFreightRoute()) {
+			trainEstimator.networkFreightTrainCountLimit = parentRouteId == null ? 4 : 6;		//Spines get lower cap since they are the shortest routes already, and encourage longer trains
+		}
 		trainEstimator.selfGetMaxSlopesFunc = this;
 		trainEstimator.additonalTrainEngine = latestEngineSet != null ? latestEngineSet.trainEngine : null;
 		trainEstimator.additonalWagonEngine = latestEngineSet != null ? latestEngineSet.wagonEngineInfos[0].engine : null;
@@ -1635,6 +1638,9 @@ class TrainRoute extends Route {
 		trainEstimator.isBidirectional = IsBiDirectional();
 		trainEstimator.isTransfer = isTransfer;
 		trainEstimator.platformLength = GetPlatformLength();
+		if(IsNetworkFreightRoute()) {
+			trainEstimator.networkFreightTrainCountLimit = parentRouteId == null ? 4 : 6;
+		}
 		trainEstimator.selfGetMaxSlopesFunc = this;
 		trainEstimator.additonalTrainEngine = latestEngineSet != null ? latestEngineSet.trainEngine : null;
 		trainEstimator.additonalWagonEngine = latestEngineSet != null ? latestEngineSet.wagonEngineInfos[0].engine : null;

@@ -986,6 +986,7 @@ class TrainEstimator extends Estimator {
 	isLimitIncome = null;
 	cargoIsTransfered = null;
 	forRawPlace = null;
+	networkFreightTrainCountLimit = null;
 	
 	// result
 	tooShortMoney = null;
@@ -1130,17 +1131,14 @@ class TrainEstimator extends Estimator {
 		return 11;
 	}
 
-	function IsTrainPlanAtNetworkFreightMaxLength(trainPlan) {
-		local remainingLength = GetNetworkFreightMaxTrainLength() * 16 - trainPlan.GetLength();
-		if(remainingLength <= 0) return true;
+	function GetEffectiveNetworkFreightMaxTrainLength() {
+		if(platformLength == null) return GetNetworkFreightMaxTrainLength();
+		return min(platformLength, GetNetworkFreightMaxTrainLength());
+	}
 
-		local minWagonLength = 16;
-		foreach(wagonInfo in trainPlan.wagonInfos) {
-			if(wagonInfo.rawin("lengthWeight") && wagonInfo.lengthWeight[0] > 0) {
-				minWagonLength = min(minWagonLength, wagonInfo.lengthWeight[0]);
-			}
-		}
-		return remainingLength < minWagonLength;
+	function GetNetworkFreightTrainCountLimit() {
+		if(networkFreightTrainCountLimit != null) return networkFreightTrainCountLimit;
+		return platformLength == null ? 4 : 6;
 	}
 
 	function CalculateSubCargoNumWagons(wagonEngineInfos, numMainWagon, totalNumWagon, locoCapacity) {
@@ -1414,6 +1412,7 @@ class TrainEstimator extends Estimator {
 		}
 	
 		local result = [];
+		local trainCountGuardFallback = null;
 		local yearlyIncome = HogeAI.Get().GetQuarterlyIncome(4);
 		local usableMoney = HogeAI.Get().GetUsableMoney();
 		local useReliability = HogeAI.Get().IsEnableVehicleBreakdowns();
@@ -1815,10 +1814,21 @@ class TrainEstimator extends Estimator {
 						
 						estimation.Estimate();
 						if(IsNetworkFreightTrainCountGuardEnabled()
-								&& platformLength == null
 								&& !isSingle
-								&& estimation.vehiclesPerRoute > 8
-								&& !IsTrainPlanAtNetworkFreightMaxLength(trainPlan)) {
+								&& estimation.length > GetEffectiveNetworkFreightMaxTrainLength() * 16) {
+							continue;
+						}
+						if(IsNetworkFreightTrainCountGuardEnabled()
+								&& !isSingle
+								&& estimation.vehiclesPerRoute > GetNetworkFreightTrainCountLimit()) {
+							if(ignoreIncome || estimation.income > 0) {
+								if(trainCountGuardFallback == null
+										|| estimation.length > trainCountGuardFallback.length
+										|| (estimation.length == trainCountGuardFallback.length
+												&& estimation.roi > trainCountGuardFallback.roi)) {
+									trainCountGuardFallback = estimation;
+								}
+							}
 							continue;
 						}
 						/*
@@ -1865,6 +1875,9 @@ class TrainEstimator extends Estimator {
 			/*if(wagonEngineEstimations.Count() >= 1) {
 				HgLog.Info("GetEngineSets estimation:"+result[wagonEngineEstimations.Begin()]);
 			}*/
+		}
+		if(result.len() == 0 && trainCountGuardFallback != null) {
+			result.push(trainCountGuardFallback);
 		}
 		return result;
 	}
