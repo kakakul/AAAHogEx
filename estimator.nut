@@ -1124,7 +1124,9 @@ class TrainEstimator extends Estimator {
 	}
 
 	function IsNetworkFreightTrainCountGuardEnabled() {
-		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
+		return networkFreightTrainCountLimit != null
+			&& HogeAI.Get().IsNetworkMode()
+			&& !CargoUtils.IsPaxOrMail(cargo);
 	}
 
 	function GetNetworkFreightMaxTrainLength() {

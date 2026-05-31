@@ -459,8 +459,41 @@ class TrainRoute extends Route {
 		return HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo);
 	}
 
+	// Excludes point-to-point town delivery so shared-network caps only apply to spine/branch traffic.
+	function IsNetworkFreightSharedRoute() {
+		return IsNetworkFreightRoute()
+			&& destHgStation != null
+			&& destHgStation.place != null
+			&& !(destHgStation.place instanceof TownCargo);
+	}
+
 	function GetNetworkFreightTrainSoftCap() {
 		return 12;
+	}
+
+	function GetNetworkFreightDestinationTrainCap() {
+		return 30;
+	}
+
+	function GetNetworkFreightDestinationTrainCount() {
+		if(!IsNetworkFreightSharedRoute()
+				|| destHgStation == null
+				|| destHgStation.place == null
+				|| !(destHgStation.place instanceof HgIndustry)) {
+			return GetNumVehicles();
+		}
+		local destIndustry = destHgStation.place.industry;
+		local result = 0;
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsRemoved() || route.IsClosed()) continue;
+			if(!(route instanceof TrainRoute)) continue;
+			if(!route.IsNetworkFreightSharedRoute()) continue;
+			if(route.destHgStation == null || route.destHgStation.place == null) continue;
+			if(!(route.destHgStation.place instanceof HgIndustry)) continue;
+			if(route.destHgStation.place.industry != destIndustry) continue;
+			result += route.GetNumVehicles();
+		}
+		return result;
 	}
 
 	function GetNetworkFreightMaxTrainLength() {
@@ -1456,7 +1489,7 @@ class TrainRoute extends Route {
 		trainEstimator.railType = GetRailType();
 		trainEstimator.isRoRo = !IsTransfer();
 		trainEstimator.platformLength = GetPlatformLength();
-		if(IsNetworkFreightRoute()) {
+		if(IsNetworkFreightSharedRoute()) {
 			trainEstimator.networkFreightTrainCountLimit = parentRouteId == null ? 4 : 6;		//Spines get lower cap since they are the shortest routes already, and encourage longer trains
 		}
 		trainEstimator.selfGetMaxSlopesFunc = this;
@@ -1638,7 +1671,7 @@ class TrainRoute extends Route {
 		trainEstimator.isBidirectional = IsBiDirectional();
 		trainEstimator.isTransfer = isTransfer;
 		trainEstimator.platformLength = GetPlatformLength();
-		if(IsNetworkFreightRoute()) {
+		if(IsNetworkFreightSharedRoute()) {
 			trainEstimator.networkFreightTrainCountLimit = parentRouteId == null ? 4 : 6;
 		}
 		trainEstimator.selfGetMaxSlopesFunc = this;
@@ -3340,7 +3373,7 @@ class TrainRoute extends Route {
 		}
 		
 		local numVehicles = GetNumVehicles();
-		if(IsNetworkFreightRoute() && latestEngineSet != null
+		if(IsNetworkFreightSharedRoute() && latestEngineSet != null
 				&& latestEngineSet.vehiclesPerRoute > 10
 				&& !IsNetworkFreightConsistAtMaxUsableLength(latestEngineSet)) {
 			HgLog.Info("NetworkFreightTrainRedesign needed vehiclesPerRoute:"
@@ -3414,15 +3447,23 @@ class TrainRoute extends Route {
 			}
 			local latestVehicle = GetLatestVehicle();
 			if(maxTrains != null && transitionMissing <= 0) numClone = min(numClone, maxTrains - numVehicles);
-			if(HogeAI.Get().IsNetworkMode() && !CargoUtils.IsPaxOrMail(cargo)) {
+			if(IsNetworkFreightSharedRoute()) {
 				local freightTrainCap = GetNetworkFreightTrainSoftCap();
 				if(numVehicles >= freightTrainCap) {
 					HgLog.Info("NetworkFreightTrainSoftCap: suppressing clone numVehicles="
 						+ numVehicles + " cap=" + freightTrainCap + " " + this);
 					return;
 				}
+				local destTrainCap = GetNetworkFreightDestinationTrainCap();
+				local destTrainCount = GetNetworkFreightDestinationTrainCount();
+				if(destTrainCount >= destTrainCap) {
+					HgLog.Info("NetworkFreightDestinationTrainCap: suppressing clone destTrains="
+						+ destTrainCount + " cap=" + destTrainCap + " " + this);
+					return;
+				}
 				numClone = min(numClone, latestEngineSet.vehiclesPerRoute - numVehicles);
 				numClone = min(numClone, freightTrainCap - numVehicles);
+				numClone = min(numClone, destTrainCap - destTrainCount);
 				if(numClone <= 0) {
 					HgLog.Info("CheckCloneTrain: suppressing clone, numVehicles=" + numVehicles
 						+ " >= vehiclesPerRoute=" + latestEngineSet.vehiclesPerRoute + " " + this);
@@ -4011,6 +4052,9 @@ class TrainRouteBuilder extends RouteBuilder {
 			}
 			if(src instanceof StationGroup) {
 				trainEstimator.cargoIsTransfered[cargo] <- true;
+			}
+			if(options.rawin("freightNetworkSpine") && options.freightNetworkSpine) {
+				trainEstimator.networkFreightTrainCountLimit = 4;
 			}
 			local engineSets = trainEstimator.GetEngineSetsOrder();
 			/*

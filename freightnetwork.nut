@@ -108,6 +108,27 @@ class FreightNetwork {
 		return count;
 	}
 
+	// Counts branch sources only; SearchAndConnect adds one for the original spine source.
+	function FreightNetwork::GetMaxBranchesPerSpine() {
+		return 5;
+	}
+
+	function FreightNetwork::GetMaxTrainsPerDestinationStation() {
+		return 30;
+	}
+
+	function FreightNetwork::CountDestinationStationTrains(destIndustry) {
+		local result = 0;
+		foreach(route in Route.GetAllRoutes()) {
+			if(route.IsRemoved() || route.IsClosed()) continue;
+			if(!(route instanceof TrainRoute)) continue;
+			if(!route.IsNetworkFreightSharedRoute()) continue;
+			if(FreightNetwork.GetRouteEndpointIndustry(route, false) != destIndustry) continue;
+			result += route.GetNumVehicles();
+		}
+		return result;
+	}
+
 	function FreightNetwork::IsTownAcceptingCargo(town, cargo) {
 		local population = AITown.GetPopulation(town);
 		local townEffect = AICargo.GetTownEffect(cargo);
@@ -1170,9 +1191,18 @@ class FreightNetwork {
 		}
 		local destSrcCount = FreightNetwork.servedDests.rawin(FreightNetwork.state.destIndustry)
 			? FreightNetwork.servedDests[FreightNetwork.state.destIndustry] : 0;
-		local maxSources = 8;
+		local maxSources = FreightNetwork.GetMaxBranchesPerSpine() + 1;
 		if(destSrcCount >= maxSources) {
 			HgLog.Info("FreightNetwork.SearchAndConnect: dest already has " + maxSources + " sources, stop connecting more sources");
+			FreightNetwork.RemoveAvailableJunctionsForDest(FreightNetwork.state.destIndustry);
+			return false;
+		}
+		local maxDestTrains = FreightNetwork.GetMaxTrainsPerDestinationStation();
+		local destTrainCount = FreightNetwork.CountDestinationStationTrains(FreightNetwork.state.destIndustry);
+		if(destTrainCount >= maxDestTrains - 1) {
+			HgLog.Info("FreightNetwork.SearchAndConnect: dest already has "
+				+ destTrainCount + "/" + maxDestTrains
+				+ " trains, stop connecting more sources");
 			FreightNetwork.RemoveAvailableJunctionsForDest(FreightNetwork.state.destIndustry);
 			return false;
 		}
