@@ -1141,6 +1141,10 @@ class TrainEstimator extends Estimator {
 		return platformLength == null ? 4 : 6;
 	}
 
+	function GetNetworkFreightWagonTargets() {
+		return [9, 13, 17, 20, 21];		//hardcode wagon lengths to match platform lengths of 5,7,9,11 and an extra case for double engine length 11
+	}
+
 	function CalculateSubCargoNumWagons(wagonEngineInfos, numMainWagon, totalNumWagon, locoCapacity) {
 		local mainWagonNull = wagonEngineInfos[0].capacity == 0;
 		if(subCargos.len() == 0) {
@@ -1678,13 +1682,23 @@ class TrainEstimator extends Estimator {
 				
 				local minNumLoco = 1;
 				local increaseLoco = true;
+				local networkFreightWagonTargets = IsNetworkFreightTrainCountGuardEnabled() ? GetNetworkFreightWagonTargets() : null;
+				local networkFreightWagonTargetIndex = 0;
 				for( ;;) {
 					
 					if(increaseLoco) {
 						trainPlan.IncreaseNumLoco();
 					} else {
 						trainPlan.SetNumLoco(minNumLoco);
-						trainPlan.IncreaseNumWagon();
+						if(networkFreightWagonTargets != null) {
+							if(networkFreightWagonTargetIndex >= networkFreightWagonTargets.len()) {
+								break;
+							}
+							trainPlan.SetNumWagon(networkFreightWagonTargets[networkFreightWagonTargetIndex]);
+							networkFreightWagonTargetIndex ++;
+						} else {
+							trainPlan.IncreaseNumWagon();
+						}
 					}
 					// HgLog.Info("numLoco:"+trainPlan.locoInfo.numLoco+" numWagon:"+trainPlan.numWagon+" length:"+trainPlan.GetLength());
 					local usedPlatformLength = platformLength == null ? (trainPlan.GetLength()+15)/16 : platformLength;
@@ -2055,6 +2069,37 @@ class TrainPlan {
 				}
 			}*/
 			DecreaseWagon(wagons.pop(),1);
+		}
+	}
+
+	function SetNumWagon(n) {
+		while(numWagon < n) {
+			IncreaseNumWagonByOne();
+		}
+		while(numWagon > n) {
+			DecreaseNumWagon();
+		}
+	}
+
+	function IncreaseNumWagonByOne() {
+		if(wagonInfos.len() == 1) {
+			IncreaseWagon(wagonInfos[0],1);
+		} else {
+			if(reachMaxVehicles) {
+				IncreaseWagon(priorityWagon,1);
+			} else {
+				local minWagonInfo = null;
+				local minCp = null;
+				foreach(wagonInfo in wagonInfos) {
+					local cargo = wagonInfo.cargo;
+					local cp = capacityPerProduction[cargo];
+					if(minWagonInfo == null || cp < minCp) {
+						minWagonInfo = wagonInfo;
+						minCp = cp;
+					}
+				}
+				IncreaseWagon(minWagonInfo,1);
+			}
 		}
 	}
 
