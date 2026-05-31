@@ -1071,12 +1071,12 @@ class FreightNetwork {
 			return;
 		}
 		// Scan a wider range of the path to find a suitable junction location.
-		// minDist=10 skips the first 10 tiles (near the station platform/depot).
+		// minDist=12 skips the station platform/depot throat before attempting junctions.
 		// maxDist is capped to leave 4 tiles at the far end but allow coverage
 		// of the middle of short routes.
 		local pathLen = arr2.len();
-		local jMinDist = 10;
-		local jMaxDist = max(30, pathLen - 10);
+		local jMinDist = 12;
+		local jMaxDist = max(32, pathLen - 12);
 		local result = FourWayJunction.TryBuildNearStation(arr2, arr1, jMinDist, jMaxDist, true);
 
 		local srcLoc = (route.srcHgStation != null && route.srcHgStation.place != null)

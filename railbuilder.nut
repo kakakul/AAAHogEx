@@ -3869,6 +3869,7 @@ class FourWayJunction {
 	static function TryBuildNearStation(mainTiles, parallelTiles, minDist, maxDist, nearSrc = true) {
 		local p2Set = {};
 		foreach(t in parallelTiles) p2Set.rawset(t, true);
+		local weightedDistances = FourWayJunction.GetWeightedPathDistances(mainTiles);
 		local tried = 0;
 		local leftTile = -1;
 		local rightTile = -1;
@@ -3880,8 +3881,10 @@ class FourWayJunction {
 		local rightAllowedTiles = null;
 
 		// Need i-2, i-1, i, i+1, i+2 all valid.
-		for(local i = minDist; i <= maxDist && i + 3 < mainTiles.len(); i++) {
+		for(local i = 0; i + 3 < mainTiles.len(); i++) {
 			if(i < 2) continue;
+			if(weightedDistances[i] < minDist) continue;
+			if(weightedDistances[i] > maxDist) break;
 			if(leftTile != -1 && rightTile != -1) break;
 			local mm1 = mainTiles[i - 2];
 			local m0 = mainTiles[i - 1];
@@ -4171,6 +4174,22 @@ class FourWayJunction {
 			leftPath = leftPath, rightPath = rightPath,
 			leftInboundPath = leftInboundPath, rightInboundPath = rightInboundPath,
 			leftAllowedTiles = leftAllowedTiles, rightAllowedTiles = rightAllowedTiles};
+	}
+
+	// Junction spacing uses visual track length: diagonal track advances count as less than a straight tile.
+	static function GetWeightedPathDistances(tiles) {
+		local result = [];
+		local distance = 0.0;
+		local prev = null;
+		foreach(tile in tiles) {
+			if(prev != null) {
+				local tracks = AIRail.GetRailTracks(tile);
+				distance += HgTile.ContainsDiagonalTrack(tracks) ? 0.4 : 1.0;
+			}
+			result.push(distance);
+			prev = tile;
+		}
+		return result;
 	}
 
 	// Check if mainTiles[i-6..i+7] forms a diagonal parallel-track window.
