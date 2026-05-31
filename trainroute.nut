@@ -468,11 +468,11 @@ class TrainRoute extends Route {
 	}
 
 	function GetNetworkFreightTrainSoftCap() {
-		return 12;
+		return 8;
 	}
 
 	function GetNetworkFreightDestinationTrainCap() {
-		return 30;
+		return 26;
 	}
 
 	function GetNetworkFreightDestinationTrainCount() {

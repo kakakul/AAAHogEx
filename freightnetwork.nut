@@ -114,7 +114,7 @@ class FreightNetwork {
 	}
 
 	function FreightNetwork::GetMaxTrainsPerDestinationStation() {
-		return 30;
+		return 26;
 	}
 
 	function FreightNetwork::CountDestinationStationTrains(destIndustry) {
