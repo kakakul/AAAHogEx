@@ -273,6 +273,7 @@ class RailPathFinder
 		return AIRail.AreTilesConnected(a,b,c) && AICompany.IsMine(AITile.GetOwner(b));
 	}
 
+	// Blocks branch paths from crossing each other at grade near a junction, which can cause deadlocks and lost trains.
 	function _IsForbiddenLevelCrossingTile(tile) {
 		return forbiddenLevelCrossingCenter != null
 			&& forbiddenLevelCrossingRadius != null

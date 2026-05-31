@@ -1025,6 +1025,7 @@ class FreightNetwork {
 		return false;
 	}
 
+	// Builds freight junctions before trains start so live trains are never exposed to half-built junction geometry.
 	function FreightNetwork::BuildJunctions() {
 		local route = FreightNetwork.state.lastBuiltRoute;
 		if(route == null) {

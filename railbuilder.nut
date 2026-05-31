@@ -710,6 +710,7 @@ class Path {
 		}
 	}
 
+	// Builds one depot beside each parallel track so freight spines do not need u-turns to reach depots.
 	function BuildSideDepotsWithParallelTrack(otherPath, isFirstLine = false) {
 		local tiles = GetTiles();
 		local otherTiles = otherPath.GetTiles();
@@ -748,6 +749,7 @@ class Path {
 		return null;
 	}
 
+	// Validates the paired-track geometry before placing opposite-side depots on the same straight segment.
 	function BuildSideDepotsOnParallelTracks(prev, cur, next, otherTileSet) {
 		local dir = abs(cur - prev) == 1 ? AIMap.GetMapSizeX() : 1;
 		local mate = null;

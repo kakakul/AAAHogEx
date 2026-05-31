@@ -1136,11 +1136,13 @@ class TrainEstimator extends Estimator {
 		return min(platformLength, GetNetworkFreightMaxTrainLength());
 	}
 
+	// Network freight caps trains per route to prefer longer consists over congesting many short trains.
 	function GetNetworkFreightTrainCountLimit() {
 		if(networkFreightTrainCountLimit != null) return networkFreightTrainCountLimit;
 		return platformLength == null ? 4 : 6;
 	}
 
+	// Freight scans platform-sized wagon counts directly so fixed targets can reach long consists.
 	function GetNetworkFreightWagonTargets() {
 		return [9, 13, 17, 20, 21];		//hardcode wagon lengths to match platform lengths of 5,7,9,11 and an extra case for double engine length 11
 	}
@@ -2081,6 +2083,7 @@ class TrainPlan {
 		}
 	}
 
+	// Adds one wagon through the cargo-balance heuristic so fixed target lengths preserve cargo mix.
 	function IncreaseNumWagonByOne() {
 		if(wagonInfos.len() == 1) {
 			IncreaseWagon(wagonInfos[0],1);
