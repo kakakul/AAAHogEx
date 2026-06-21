@@ -838,6 +838,8 @@ class HogeAI extends AIController {
 	}
 
 	function DoStep() {
+		// Keep train estimation DoCommand-free by warming queued train info before route planning.
+		TrainInfoDictionary.Get().PrewarmPending();
 		switch(indexPointer) {
 			case 0:
 				//CheckBuildedPaths();

@@ -1068,9 +1068,12 @@ class TrainEstimator extends Estimator {
 			HgLog.Warning("No suitable wagon.");
 			return null;
 		}
-		local trainEngineInfo = TrainInfoDictionary.Get().GetTrainInfo(trainEngine);
+		local trainEngineInfo = TrainInfoDictionary.Get().GetCachedTrainInfo(trainEngine);
+		if(trainEngineInfo == null) {
+			return null;
+		}
 		foreach(e,_ in wagonEngines) {
-			local wagonEngineInfo = TrainInfoDictionary.Get().GetTrainInfo(e);
+			local wagonEngineInfo = TrainInfoDictionary.Get().GetCachedTrainInfo(e);
 			if(wagonEngineInfo != null) {
 				wagonEngines.SetValue(e, wagonEngineInfo.isMultipleUnit == trainEngineInfo.isMultipleUnit ? 1 : 0);
 			} else {
@@ -1103,7 +1106,8 @@ class TrainEstimator extends Estimator {
 		}
 		wagonEngines.KeepValue(speed);
 		wagonEngines.Valuate(function(e):(subCargo) {
-			local wagonInfo = TrainInfoDictionary.Get().GetTrainInfo(e);
+			local wagonInfo = TrainInfoDictionary.Get().PeekTrainInfo(e);
+			if(wagonInfo == null) return 0;
 			return wagonInfo.cargoCapacity.rawin(subCargo) ? wagonInfo.cargoCapacity[subCargo] : 0; 
 		});
 		wagonEngines.KeepAboveValue(0);
@@ -1238,7 +1242,7 @@ class TrainEstimator extends Estimator {
 
 	function GetWagonEngineInfo(cargo, engine) {
 		local result = {};
-		local wagonInfo = TrainInfoDictionary.Get().GetTrainInfo(engine);	
+		local wagonInfo = TrainInfoDictionary.Get().GetCachedTrainInfo(engine);
 		if(wagonInfo == null) {
 			HgLog.Warning("wagonInfo==null:"+AIEngine.GetName(engine));
 			return null;
@@ -1268,7 +1272,7 @@ class TrainEstimator extends Estimator {
 		local result = [];
 		// バランス
 		result.push(function(engine):(cargo,railSpeed) {
-			local wagonInfo = TrainInfoDictionary.Get().GetTrainInfo(engine);
+			local wagonInfo = TrainInfoDictionary.Get().PeekTrainInfo(engine);
 			if(wagonInfo==null) {
 				return 0;
 			}
@@ -1284,7 +1288,7 @@ class TrainEstimator extends Estimator {
 		});
 		// 容量重視
 		result.push(function(engine):(cargo) {
-			local wagonInfo = TrainInfoDictionary.Get().GetTrainInfo(engine);
+			local wagonInfo = TrainInfoDictionary.Get().PeekTrainInfo(engine);
 			if(wagonInfo==null || wagonInfo.length==0) {
 				return 0;
 			}
@@ -1316,7 +1320,10 @@ class TrainEstimator extends Estimator {
 			return wagonEnginesCache.rawget(key);
 		}
 		local result = _GetWagonEngines(cargo, railType);
-		wagonEnginesCache.rawset(key, result);
+		// Do not cache cold-cache misses; queued train-info probes can make this list valid next step.
+		if(TrainInfoDictionary.Get().GetPendingRequestCount() == 0) {
+			wagonEnginesCache.rawset(key, result);
+		}
 		return result;
 	}
 	
@@ -1367,8 +1374,14 @@ class TrainEstimator extends Estimator {
 		
 		wagonEngines.Sort(AIList.SORT_BY_VALUE,true);
 		wagonEngines.Valuate(AIBase.RandItem);
+		local missingTrainInfos = [];
 		foreach(engine,_ in wagonEngines) {
-			TrainInfoDictionary.Get().GetTrainInfo(engine);	 // Valuateの中でBuildTrainが呼ばれるのを防ぐ
+			if(TrainInfoDictionary.Get().GetCachedTrainInfo(engine) == null) {
+				missingTrainInfos.push(engine);
+			}
+		}
+		foreach(engine in missingTrainInfos) {
+			wagonEngines.RemoveItem(engine);
 		}
 		foreach(index, selector in wagonSelectors) {
 			local tmp = AIList();
@@ -1542,7 +1555,7 @@ class TrainEstimator extends Estimator {
 				if(wagonEngine != null && !AIEngine.CanRunOnRail(wagonEngine, trainRailType)) {
 					continue;
 				}
-				local trainInfo = TrainInfoDictionary.Get().GetTrainInfo(trainEngine);
+				local trainInfo = TrainInfoDictionary.Get().GetCachedTrainInfo(trainEngine);
 				if(trainInfo == null) {
 					continue;
 				}
@@ -2337,10 +2350,12 @@ class TrainInfoDictionary {
 
 	dictionary = null;
 	railTypeDepot = null;
+	pendingTrainInfoEngines = null;
 	
 	constructor() {
 		dictionary = {};
 		railTypeDepot = {};
+		pendingTrainInfoEngines = {};
 	}
 	
 	
@@ -2352,6 +2367,7 @@ class TrainInfoDictionary {
 	function Load(data) {
 		dictionary = data.dictionary;
 		railTypeDepot = data.railTypeDepot;
+		pendingTrainInfoEngines = {};
 		
 		foreach(e,trainInfo in dictionary) {
 			if(!trainInfo.rawin("isMultipleUnit")) {
@@ -2359,6 +2375,69 @@ class TrainInfoDictionary {
 			}
 			break;
 		}
+	}
+
+	function PeekTrainInfo(engine) {
+		if(dictionary.rawin(engine)) {
+			return dictionary[engine];
+		}
+		return null;
+	}
+
+	function RequestTrainInfo(engine) {
+		if(dictionary.rawin(engine)) {
+			return;
+		}
+		if(!AIEngine.IsValidEngine(engine) || !AIEngine.IsBuildable(engine)) {
+			return;
+		}
+		pendingTrainInfoEngines.rawset(engine, true);
+	}
+
+	// Estimators must not create depots/vehicles; missing train info is queued for safe prewarming.
+	function GetCachedTrainInfo(engine) {
+		local trainInfo = PeekTrainInfo(engine);
+		if(trainInfo != null) {
+			return trainInfo;
+		}
+		RequestTrainInfo(engine);
+		return null;
+	}
+
+	function GetPendingRequestCount() {
+		return pendingTrainInfoEngines.len();
+	}
+
+	// Processes queued train-info probes from normal AI steps, where temporary depot DoCommands are allowed.
+	function PrewarmPending(maxCount = 3) {
+		if(pendingTrainInfoEngines.len() == 0) {
+			return 0;
+		}
+		local engines = [];
+		foreach(engine, _ in pendingTrainInfoEngines) {
+			engines.push(engine);
+			if(engines.len() >= maxCount) break;
+		}
+		local processed = 0;
+		foreach(engine in engines) {
+			pendingTrainInfoEngines.rawdelete(engine);
+			if(dictionary.rawin(engine)) {
+				continue;
+			}
+			if(!AIEngine.IsValidEngine(engine) || !AIEngine.IsBuildable(engine)) {
+				continue;
+			}
+			local trainInfo = GetTrainInfo(engine);
+			if(trainInfo == null) {
+				pendingTrainInfoEngines.rawset(engine, true);
+			}
+			processed++;
+		}
+		if(processed >= 1) {
+			HgLog.Info("TrainInfoDictionary.PrewarmPending processed:" + processed
+				+ " remaining:" + pendingTrainInfoEngines.len());
+		}
+		return processed;
 	}
 	
 	
