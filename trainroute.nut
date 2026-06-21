@@ -3319,6 +3319,21 @@ class TrainRoute extends Route {
 		}
 	}
 
+	function GetSourceStationStopTiles() {
+		local result = srcHgStation.GetPlatformRectangle().GetTileList();
+		foreach(tiles in srcHgStation.GetArrivalsTiles()) {
+			foreach(tile in tiles) {
+				result.AddTile(tile);
+			}
+		}
+		foreach(tiles in srcHgStation.GetDeparturesTiles()) {
+			foreach(tile in tiles) {
+				result.AddTile(tile);
+			}
+		}
+		return result;
+	}
+
 	function CheckCloneTrain() {
 		if(isClosed || isRemoved || updateRailDepot!=null) {
 			return;
@@ -3351,10 +3366,18 @@ class TrainRoute extends Route {
 		local ng = false;
 		local srcStationId = srcHgStation.GetAIStation() 
 		local srcStationStops = [];
+		local sourceStopTiles = null;
 		foreach(vehicle, _ in GetVehicleList()) {
-			if(AIStation.GetStationID(AIVehicle.GetLocation(vehicle)) == srcStationId) {
+			local vehicleLocation = AIVehicle.GetLocation(vehicle);
+			if(AIStation.GetStationID(vehicleLocation) == srcStationId) {
 				ng = true;
-				if(AIVehicle.GetState(vehicle) == AIVehicle.VS_AT_STATION) {
+				srcStationStops.push(vehicle);
+			} else if(IsNetworkFreightRoute() && AIVehicle.GetCurrentSpeed(vehicle) == 0) {	//traffic jam protection including stopped trains in station throat
+				if(sourceStopTiles == null) {
+					sourceStopTiles = GetSourceStationStopTiles();
+				}
+				if(sourceStopTiles.HasItem(vehicleLocation)) {
+					ng = true;
 					srcStationStops.push(vehicle);
 				}
 			}
@@ -3365,7 +3388,7 @@ class TrainRoute extends Route {
 				ng = true;
 			}
 		}
-		if((IsBiDirectional() || returnRoute != null) && srcStationStops.len() == srcHgStation.platformNum) {
+		if((IsBiDirectional() || returnRoute != null) && srcStationStops.len() >= srcHgStation.platformNum) {
 			SendVehicleToDepot(srcStationStops[0]);
 		}
 		if(ng) {
