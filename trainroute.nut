@@ -319,6 +319,7 @@ class TrainRoute extends Route {
 	consumedJunction = null;
 	disableFullLoadOrder = null;
 	lastBuildFirstTrainFailureIsMoney = null;
+	srcStationDepotSendIndex = null;
 
 	saveData = null;
 	
@@ -363,6 +364,7 @@ class TrainRoute extends Route {
 		this.consumedJunction = null;
 		this.disableFullLoadOrder = false;
 		this.lastBuildFirstTrainFailureIsMoney = false;
+		this.srcStationDepotSendIndex = 0;
 		this.pathDistance = pathSrcToDest.path.GetRailDistance();
 		this.cargoSet = {};
 	}
@@ -3389,7 +3391,12 @@ class TrainRoute extends Route {
 			}
 		}
 		if((IsBiDirectional() || returnRoute != null) && srcStationStops.len() >= srcHgStation.platformNum) {
-			SendVehicleToDepot(srcStationStops[0]);
+			local sendIndex = srcStationDepotSendIndex % srcStationStops.len();
+			local vehicle = srcStationStops[sendIndex];
+			HgLog.Info("CheckCloneTrain: source station blocked, send train to depot index="
+				+ sendIndex + "/" + srcStationStops.len() + " vehicle:" + vehicle + " " + this);
+			SendVehicleToDepot(vehicle);
+			srcStationDepotSendIndex = sendIndex + 1;
 		}
 		if(ng) {
 			return;
