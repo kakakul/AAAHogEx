@@ -48,6 +48,7 @@ class HogeAI extends AIController {
 	maxLoan = null;
 	dayLengthFactor = null;
 	prevLoadAmount = null;
+	networkModeDisabledForTrains = null;
 
 
 	roiBase = null;
@@ -265,6 +266,7 @@ class HogeAI extends AIController {
 		lastScanRouteDates = {};
 		noRouteCnadidates = false;
 		lostVehicleDiagnostics = {};
+		networkModeDisabledForTrains = false;
 	}
 
 	function Start() {
@@ -5016,7 +5018,8 @@ class HogeAI extends AIController {
 	}
 
 	function IsNetworkMode() {
-		return GetSetting("network_mode") == 1;
+		return GetSetting("network_mode") == 1
+			&& AIGameSettings.GetValue("ai.ai_disable_veh_train") != 1;
 	}
 
 	function IsEnableVehicleBreakdowns() {
@@ -5075,6 +5078,12 @@ class HogeAI extends AIController {
 		if(AIGameSettings.GetValue("ai.ai_disable_veh_train")==1 || GetSetting("disable_veh_train")==1) {
 			maxTrains = 0;
 		}
+		local networkModeDisabledForTrainsNow = GetSetting("network_mode") == 1
+			&& AIGameSettings.GetValue("ai.ai_disable_veh_train") == 1;
+		if(networkModeDisabledForTrainsNow && !networkModeDisabledForTrains) {
+			HgLog.Warning("Network mode disabled: OpenTTD has disabled trains for computer players");
+		}
+		networkModeDisabledForTrains = networkModeDisabledForTrainsNow;
 		if(AIGameSettings.GetValue("ai.ai_disable_veh_roadveh")==1 || (HogeAI.Get().IsDisableRoad() && HogeAI.Get().IsDisableTrams())) {
 			maxRoadVehicle = 0;
 		}
